@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}确认删除递送任务{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-danger text-white"><i class="bi bi-exclamation-triangle"></i> 确认删除</div>
+            <div class="card-body">
+                <p>确定要删除递送任务 <strong>{{ task.task_code }}（{{ task.origin.code }} → {{ task.destination.code }}）</strong> 吗？</p>
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> 确认删除</button>
+                        <a href="{% url 'courier:task_list' %}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> 取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

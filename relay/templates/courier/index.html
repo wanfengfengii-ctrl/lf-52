@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}驿站文书递送模拟系统 - 首页{% endblock %}
+
+{% block content %}
+<div class="hero-section rounded mb-4">
+    <h1 class="display-5 fw-bold"><i class="bi bi-signpost-2"></i> 驿站文书递送模拟系统</h1>
+    <p class="lead mt-3">模拟古代驿站文书递送，分析不同驿站间距、换马规则、天气和道路等级对送达时间的影响</p>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number">{{ station_count }}</div>
+            <div class="stat-label"><i class="bi bi-building"></i> 驿站</div>
+            <a href="{% url 'courier:station_list' %}" class="btn btn-sm btn-outline-primary mt-2">管理驿站</a>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number">{{ road_count }}</div>
+            <div class="stat-label"><i class="bi bi-signpost-split"></i> 道路</div>
+            <a href="{% url 'courier:road_list' %}" class="btn btn-sm btn-outline-primary mt-2">管理道路</a>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number">{{ task_count }}</div>
+            <div class="stat-label"><i class="bi bi-envelope-paper"></i> 递送任务</div>
+            <a href="{% url 'courier:task_list' %}" class="btn btn-sm btn-outline-primary mt-2">管理任务</a>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number">{{ strategy_count }}</div>
+            <div class="stat-label"><i class="bi bi-horseshoe"></i> 换马策略</div>
+            <a href="{% url 'courier:strategy_list' %}" class="btn btn-sm btn-outline-primary mt-2">管理策略</a>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-map"></i> 驿站地图</div>
+            <div class="card-body">
+                <p>在地图上查看所有驿站的分布及道路连接情况，直观了解递送网络。</p>
+                <a href="{% url 'courier:map_view' %}" class="btn btn-primary"><i class="bi bi-geo-alt"></i> 打开地图</a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-graph-up"></i> 时效分析</div>
+            <div class="card-body">
+                <p>分析不同因素对递送时间的影响，比较换马策略，识别延误风险路段。</p>
+                <a href="{% url 'courier:analysis_dashboard' %}" class="btn btn-primary"><i class="bi bi-bar-chart"></i> 查看分析</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

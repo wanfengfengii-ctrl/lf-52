@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}驿站档案{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-building"></i> 驿站档案</h3>
+    <a href="{% url 'courier:station_create' %}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 新建驿站</a>
+</div>
+
+{% if stations %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>编号</th>
+                    <th>名称</th>
+                    <th>纬度</th>
+                    <th>经度</th>
+                    <th>描述</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for station in stations %}
+                <tr>
+                    <td><strong>{{ station.code }}</strong></td>
+                    <td>{{ station.name }}</td>
+                    <td>{{ station.latitude|floatformat:4 }}</td>
+                    <td>{{ station.longitude|floatformat:4 }}</td>
+                    <td>{{ station.description|truncatechars:30 }}</td>
+                    <td>
+                        <a href="{% url 'courier:station_update' station.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{% url 'courier:station_delete' station.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">暂无驿站，请先创建驿站。</div>
+{% endif %}
+{% endblock %}

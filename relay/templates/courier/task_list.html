@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}递送任务{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-envelope-paper"></i> 递送任务</h3>
+    <a href="{% url 'courier:task_create' %}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 新建递送任务</a>
+</div>
+
+{% if tasks %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>任务编号</th>
+                    <th>路线</th>
+                    <th>优先级</th>
+                    <th>策略</th>
+                    <th>状态</th>
+                    <th>预计时辰</th>
+                    <th>风险</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td><strong>{{ task.task_code }}</strong></td>
+                    <td>{{ task.origin.code }} → {{ task.destination.code }}</td>
+                    <td>{{ task.get_priority_display }}</td>
+                    <td>{{ task.strategy.name|default:"—" }}</td>
+                    <td>
+                        {% if task.status == 'draft' %}
+                            <span class="badge bg-secondary">{{ task.get_status_display }}</span>
+                        {% elif task.status == 'executable' %}
+                            <span class="badge bg-success">{{ task.get_status_display }}</span>
+                        {% elif task.status == 'in_progress' %}
+                            <span class="badge bg-primary">{{ task.get_status_display }}</span>
+                        {% elif task.status == 'completed' %}
+                            <span class="badge bg-info">{{ task.get_status_display }}</span>
+                        {% elif task.status == 'delayed' %}
+                            <span class="badge bg-danger">{{ task.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ task.estimated_hours|default:"—" }}</td>
+                    <td>
+                        {% if task.has_high_risk %}
+                            <span class="badge bg-danger">高风险</span>
+                        {% else %}
+                            <span class="badge bg-success">安全</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'courier:task_detail' task.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-eye"></i></a>
+                        <a href="{% url 'courier:task_delete' task.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">暂无递送任务，请先创建任务。</div>
+{% endif %}
+{% endblock %}

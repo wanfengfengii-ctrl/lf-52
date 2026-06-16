@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}驿站地图{% endblock %}
+
+{% block extra_head %}
+<style>
+    .map-legend {
+        background: white;
+        padding: 10px 15px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        font-size: 13px;
+        line-height: 1.8;
+    }
+    .map-legend h6 { margin-bottom: 5px; }
+    .legend-color {
+        display: inline-block;
+        width: 20px;
+        height: 4px;
+        margin-right: 5px;
+        vertical-align: middle;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h3 class="mb-3"><i class="bi bi-map"></i> 驿站地图</h3>
+<div id="map"></div>
+
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-calculator"></i> 路线快速计算</div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">起点驿站</label>
+                        <select id="calc-origin" class="form-select"></select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">终点驿站</label>
+                        <select id="calc-dest" class="form-select"></select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">优先级</label>
+                        <select id="calc-priority" class="form-select">
+                            <option value="1">普通</option>
+                            <option value="2">加急</option>
+                            <option value="3">八百里加急</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">换马策略</label>
+                        <select id="calc-strategy" class="form-select">
+                            <option value="">不换马</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button id="calc-btn" class="btn btn-primary w-100"><i class="bi bi-calculator"></i> 计算</button>
+                    </div>
+                </div>
+                <div id="calc-result" class="mt-3" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    var stations = {{ stations_json|safe }};
+    var roads = {{ roads_json|safe }};
+    var weatherMap = {{ weather_json|safe }};
+
+    var map = L.map('map').setView([34.5, 108], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 18
+    }).addTo(map);
+
+    var stationMarkers = {};
+    var bounds = [];
+
+    stations.forEach(function(s) {
+        var marker = L.marker([s.lat, s.lng]).addTo(map);
+        marker.bindPopup('<strong>' + s.code + '</strong> - ' + s.name);
+        marker.bindTooltip(s.code + ' ' + s.name, {permanent: false});
+        stationMarkers[s.id] = marker;
+        bounds.push([s.lat, s.lng]);
+    });
+
+    if (bounds.length > 0) {
+        map.fitBounds(bounds, {padding: [50, 50]});
+    }
+
+    var gradeColors = {1:'#2E7D32', 2:'#1565C0', 3:'#F9A825', 4:'#E65100', 5:'#B71C1C'};
+
+    roads.forEach(function(r) {
+        var color = gradeColors[r.grade] || '#666';
+        var weight = 6 - r.grade + 1;
+        var weatherInfo = weatherMap[r.id];
+        var popup = '<strong>' + r.from.code + ' → ' + r.to.code + '</strong><br>' +
+            '距离: ' + r.distance + '里<br>' +
+            '等级: ' + r.grade_display + '<br>' +
+            '坡度: ' + r.slope + '度';
+        if (weatherInfo) {
+            popup += '<br>天气: ' + weatherInfo.display + ' (系数×' + weatherInfo.factor + ')';
+        }
+
+        var polyline = L.polyline([
+            [r.from.lat, r.from.lng],
+            [r.to.lat, r.to.lng]
+        ], {color: color, weight: weight, opacity: 0.8}).addTo(map);
+        polyline.bindPopup(popup);
+    });
+
+    var legend = L.control({position: 'bottomright'});
+    legend.onAdd = function() {
+        var div = L.DomUtil.create('div', 'map-legend');
+        div.innerHTML = '<h6>道路等级</h6>' +
+            '<span class="legend-color" style="background:#2E7D32"></span> 官道（最优）<br>' +
+            '<span class="legend-color" style="background:#1565C0"></span> 驿道（良好）<br>' +
+            '<span class="legend-color" style="background:#F9A825"></span> 乡道（一般）<br>' +
+            '<span class="legend-color" style="background:#E65100"></span> 山路（较差）<br>' +
+            '<span class="legend-color" style="background:#B71C1C"></span> 险道（极差）';
+        return div;
+    };
+    legend.addTo(map);
+
+    var originSel = document.getElementById('calc-origin');
+    var destSel = document.getElementById('calc-dest');
+    stations.forEach(function(s) {
+        var opt1 = document.createElement('option');
+        opt1.value = s.id; opt1.text = s.code + ' - ' + s.name;
+        originSel.appendChild(opt1);
+        var opt2 = document.createElement('option');
+        opt2.value = s.id; opt2.text = s.code + ' - ' + s.name;
+        destSel.appendChild(opt2);
+    });
+
+    fetch('/api/strategies/').then(r => r.json()).then(data => {
+        var sel = document.getElementById('calc-strategy');
+        data.forEach(function(s) {
+            var opt = document.createElement('option');
+            opt.value = s.id; opt.text = s.name;
+            sel.appendChild(opt);
+        });
+    }).catch(() => {});
+
+    document.getElementById('calc-btn').addEventListener('click', function() {
+        var origin = originSel.value;
+        var dest = destSel.value;
+        var priority = document.getElementById('calc-priority').value;
+        var strategy = document.getElementById('calc-strategy').value;
+        var resultDiv = document.getElementById('calc-result');
+
+        if (!origin || !dest) { alert('请选择起点和终点'); return; }
+        if (origin === dest) { alert('起点和终点不能相同'); return; }
+
+        var url = '/api/calculate/?origin=' + origin + '&destination=' + dest + '&priority=' + priority;
+        if (strategy) url += '&strategy=' + strategy;
+
+        fetch(url).then(r => r.json()).then(data => {
+            if (data.error) {
+                resultDiv.innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
+            } else {
+                var riskBadge = data.has_high_risk ?
+                    '<span class="badge badge-risk">存在高风险</span>' :
+                    '<span class="badge badge-safe">无高风险</span>';
+                var html = '<div class="alert alert-success">' +
+                    '<h5>预计送达时间: <strong>' + data.total_time + ' 时辰</strong> ' + riskBadge + '</h5>' +
+                    '</div><table class="table table-sm table-hover"><thead><tr>' +
+                    '<th>顺序</th><th>路段</th><th>距离(里)</th><th>行进(时辰)</th>' +
+                    '<th>换马(时辰)</th><th>合计(时辰)</th><th>风险</th></tr></thead><tbody>';
+                data.segments.forEach(function(seg) {
+                    var rowClass = seg.is_high_risk ? ' class="risk-row"' : '';
+                    var riskBadge2 = seg.is_high_risk ?
+                        '<span class="badge badge-risk">高风险</span>' :
+                        '<span class="badge badge-safe">正常</span>';
+                    html += '<tr' + rowClass + '><td>' + seg.order + '</td><td>' + seg.from + '→' + seg.to +
+                        '</td><td>' + seg.distance + '</td><td>' + seg.travel_time +
+                        '</td><td>' + seg.horse_change_time + '</td><td>' + seg.time +
+                        '</td><td>' + riskBadge2 + '</td></tr>';
+                });
+                html += '</tbody></table>';
+                resultDiv.innerHTML = html;
+            }
+            resultDiv.style.display = 'block';
+        });
+    });
+</script>
+{% endblock %}

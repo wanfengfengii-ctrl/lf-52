@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}天气记录{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-cloud-sun"></i> 天气记录</h3>
+    <a href="{% url 'courier:weather_create' %}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 新建天气记录</a>
+</div>
+
+{% if weather_records %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>道路</th>
+                    <th>天气类型</th>
+                    <th>速度系数</th>
+                    <th>记录时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in weather_records %}
+                <tr>
+                    <td>{{ record.road.from_station.code }} → {{ record.road.to_station.code }}</td>
+                    <td>{{ record.get_weather_type_display }}</td>
+                    <td><span class="badge bg-primary">{{ record.speed_factor }}</span></td>
+                    <td>{{ record.recorded_at }}</td>
+                    <td>
+                        <a href="{% url 'courier:weather_update' record.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{% url 'courier:weather_delete' record.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">暂无天气记录，请先创建。</div>
+{% endif %}
+{% endblock %}

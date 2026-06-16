@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}道路档案{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-signpost-split"></i> 道路档案</h3>
+    <a href="{% url 'courier:road_create' %}" class="btn btn-primary"><i class="bi bi-plus-circle"></i> 新建道路</a>
+</div>
+
+{% if roads %}
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>路线</th>
+                    <th>距离（里）</th>
+                    <th>坡度（度）</th>
+                    <th>通行等级</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for road in roads %}
+                <tr>
+                    <td><strong>{{ road.from_station.code }} → {{ road.to_station.code }}</strong></td>
+                    <td>{{ road.distance|floatformat:1 }}</td>
+                    <td>{{ road.slope|floatformat:1 }}</td>
+                    <td>{{ road.get_grade_display }}</td>
+                    <td>
+                        <a href="{% url 'courier:road_update' road.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                        <a href="{% url 'courier:road_delete' road.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-info">暂无道路，请先创建道路。</div>
+{% endif %}
+{% endblock %}

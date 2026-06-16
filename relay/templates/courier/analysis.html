@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}时效分析{% endblock %}
+
+{% block content %}
+<h3 class="mb-4"><i class="bi bi-graph-up"></i> 时效分析仪表盘</h3>
+
+{% if task_data %}
+<div class="row g-4">
+    {% for item in task_data %}
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-envelope-paper"></i>
+                {{ item.task.task_code }}: {{ item.task.origin.code }} → {{ item.task.destination.code }}
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <small class="text-muted">预计送达</small>
+                        <div class="fw-bold" style="font-size:1.3rem; color: var(--relay-secondary);">
+                            {{ item.task.estimated_hours }} 时辰
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <small class="text-muted">风险状态</small>
+                        <div>
+                            {% if item.task.has_high_risk %}
+                                <span class="badge badge-risk"><i class="bi bi-exclamation-triangle"></i> 存在高风险</span>
+                            {% else %}
+                                <span class="badge badge-safe"><i class="bi bi-check-circle"></i> 无高风险</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <small class="text-muted">优先级: {{ item.task.get_priority_display }} | 策略: {{ item.task.strategy.name|default:"无" }}</small>
+                </div>
+                <canvas id="chart-task-{{ item.task.pk }}" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 暂无递送任务数据。请先创建递送任务，系统将自动进行时效分析。
+</div>
+{% endif %}
+
+{% if comparison_available %}
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-bar-chart"></i> 换马策略对比（基于首个任务路线）</div>
+    <div class="card-body">
+        <canvas id="strategy-comparison-chart" height="250"></canvas>
+    </div>
+</div>
+{% endif %}
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-info-circle"></i> 影响因素说明</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <h6><i class="bi bi-ruler"></i> 驿站间距</h6>
+                <p class="small text-muted">道路长度越长，行进时间越久。基础速度为每时辰60里。</p>
+            </div>
+            <div class="col-md-3">
+                <h6><i class="bi bi-horseshoe"></i> 换马规则</h6>
+                <p class="small text-muted">定期换马可保持速度，但换马本身耗费时间。间隔越短，换马越频繁。</p>
+            </div>
+            <div class="col-md-3">
+                <h6><i class="bi bi-cloud-sun"></i> 天气影响</h6>
+                <p class="small text-muted">晴朗无影响（×1.0），暴雨暴雪严重影响（×2.0~2.5），高风险天气可能产生断点。</p>
+            </div>
+            <div class="col-md-3">
+                <h6><i class="bi bi-signpost-split"></i> 道路等级</h6>
+                <p class="small text-muted">官道速度最优（×1.0），险道极差（×0.25）。等级5以上道路自动标为高风险。</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    {% for item in task_data %}
+    (function() {
+        var ctx = document.getElementById('chart-task-{{ item.task.pk }}');
+        if (!ctx) return;
+        var data = {{ item.chart_data|safe }};
+
+        var bgColors = data.risks.map(function(r) {
+            return r ? 'rgba(198,40,40,0.7)' : 'rgba(210,105,30,0.7)';
+        });
+        var bgColorsHorse = data.risks.map(function(r) {
+            return r ? 'rgba(198,40,40,0.4)' : 'rgba(139,69,19,0.4)';
+        });
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: '行进时间',
+                        data: data.travel_times,
+                        backgroundColor: bgColors,
+                    },
+                    {
+                        label: '换马时间',
+                        data: data.horse_change_times,
+                        backgroundColor: bgColorsHorse,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { stacked: true },
+                    y: { stacked: true, title: { display: true, text: '时辰' } }
+                },
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
+    })();
+    {% endfor %}
+
+    {% if comparison_available %}
+    (function() {
+        var ctx = document.getElementById('strategy-comparison-chart');
+        if (!ctx) return;
+        var data = {{ comparison_data|safe }};
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.map(function(d) { return d.name; }),
+                datasets: [{
+                    label: '预计送达时间（时辰）',
+                    data: data.map(function(d) { return d.time; }),
+                    backgroundColor: [
+                        'rgba(139,69,19,0.7)',
+                        'rgba(210,105,30,0.7)',
+                        'rgba(244,164,96,0.7)',
+                        'rgba(46,125,50,0.7)',
+                        'rgba(21,101,192,0.7)',
+                    ],
+                }]
+            },
+            options: {
+                responsive: true,
+                indexAxis: 'y',
+                scales: {
+                    x: { title: { display: true, text: '时辰' } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+    })();
+    {% endif %}
+</script>
+{% endblock %}
