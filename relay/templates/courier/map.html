@@ -20,11 +20,47 @@
         margin-right: 5px;
         vertical-align: middle;
     }
+    .mode-active {
+        outline: 3px solid #dc3545;
+        outline-offset: 3px;
+    }
+    .station-selected {
+        filter: hue-rotate(60deg) brightness(1.2);
+    }
+    .preview-line {
+        stroke-dasharray: 10, 5;
+        animation: dash 0.5s linear infinite;
+    }
+    @keyframes dash {
+        to { stroke-dashoffset: -15; }
+    }
+    .leaflet-marker-icon.create-mode-from {
+        filter: hue-rotate(120deg) drop-shadow(0 0 6px #198754);
+    }
+    .leaflet-marker-icon.create-mode-hover {
+        filter: drop-shadow(0 0 6px #0d6efd);
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<h3 class="mb-3"><i class="bi bi-map"></i> 驿站地图</h3>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3><i class="bi bi-map"></i> 驿站地图</h3>
+    <div>
+        <button id="create-road-btn" class="btn btn-outline-primary">
+            <i class="bi bi-plus-circle"></i> 连线创建道路
+        </button>
+        <button id="cancel-create-btn" class="btn btn-outline-secondary" style="display:none;">
+            <i class="bi bi-x-circle"></i> 取消创建
+        </button>
+    </div>
+</div>
+
+<div id="create-tip" class="alert alert-info mb-3" style="display:none;">
+    <i class="bi bi-info-circle"></i>
+    <span id="create-tip-text">请点击地图上的起点驿站</span>
+</div>
+
 <div id="map"></div>
 
 <div class="row mt-3">
@@ -64,6 +100,46 @@
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="roadFormModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-signpost-split"></i> 创建道路</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">路线</label>
+                    <div class="fw-bold" id="modal-road-name">-</div>
+                </div>
+                <div class="mb-3">
+                    <label for="modal-distance" class="form-label">道路长度（里）<span class="text-danger">*</span></label>
+                    <input type="number" id="modal-distance" class="form-control" min="0.1" step="0.1" value="30">
+                </div>
+                <div class="mb-3">
+                    <label for="modal-slope" class="form-label">坡度（度）</label>
+                    <input type="number" id="modal-slope" class="form-control" min="0" max="90" step="1" value="0">
+                </div>
+                <div class="mb-3">
+                    <label for="modal-grade" class="form-label">通行等级</label>
+                    <select id="modal-grade" class="form-select">
+                        <option value="1">官道（最优）</option>
+                        <option value="2" selected>驿道（良好）</option>
+                        <option value="3">乡道（一般）</option>
+                        <option value="4">山路（较差）</option>
+                        <option value="5">险道（极差）</option>
+                    </select>
+                </div>
+                <div id="modal-error" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="modal-submit-btn"><i class="bi bi-check-circle"></i> 创建道路</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -81,12 +157,30 @@
     var stationMarkers = {};
     var bounds = [];
 
+    function getStationById(id) {
+        return stations.find(function(s) { return s.id == id; });
+    }
+
     stations.forEach(function(s) {
         var marker = L.marker([s.lat, s.lng]).addTo(map);
+        marker.stationId = s.id;
         marker.bindPopup('<strong>' + s.code + '</strong> - ' + s.name);
         marker.bindTooltip(s.code + ' ' + s.name, {permanent: false});
         stationMarkers[s.id] = marker;
         bounds.push([s.lat, s.lng]);
+
+        marker.on('mouseover', function() {
+            if (createRoadMode && fromStation) {
+                marker._icon.classList.add('create-mode-hover');
+            }
+        });
+        marker.on('mouseout', function() {
+            marker._icon && marker._icon.classList.remove('create-mode-hover');
+        });
+
+        marker.on('click', function() {
+            handleStationClick(s.id);
+        });
     });
 
     if (bounds.length > 0) {
@@ -94,8 +188,9 @@
     }
 
     var gradeColors = {1:'#2E7D32', 2:'#1565C0', 3:'#F9A825', 4:'#E65100', 5:'#B71C1C'};
+    var roadPolylines = [];
 
-    roads.forEach(function(r) {
+    function drawRoad(r) {
         var color = gradeColors[r.grade] || '#666';
         var weight = 6 - r.grade + 1;
         var weatherInfo = weatherMap[r.id];
@@ -112,7 +207,11 @@
             [r.to.lat, r.to.lng]
         ], {color: color, weight: weight, opacity: 0.8}).addTo(map);
         polyline.bindPopup(popup);
-    });
+        polyline.roadId = r.id;
+        roadPolylines.push(polyline);
+    }
+
+    roads.forEach(function(r) { drawRoad(r); });
 
     var legend = L.control({position: 'bottomright'});
     legend.onAdd = function() {
@@ -188,5 +287,155 @@
             resultDiv.style.display = 'block';
         });
     });
+
+    var createRoadMode = false;
+    var fromStation = null;
+    var previewLine = null;
+    var roadFormModal = null;
+
+    document.getElementById('create-road-btn').addEventListener('click', function() {
+        createRoadMode = true;
+        fromStation = null;
+        document.getElementById('create-road-btn').style.display = 'none';
+        document.getElementById('cancel-create-btn').style.display = 'inline-block';
+        document.getElementById('create-tip').style.display = 'block';
+        document.getElementById('create-tip-text').textContent = '请点击地图上的起点驿站';
+        map.getContainer().style.cursor = 'crosshair';
+    });
+
+    document.getElementById('cancel-create-btn').addEventListener('click', cancelCreateRoad);
+
+    function cancelCreateRoad() {
+        createRoadMode = false;
+        fromStation = null;
+        if (previewLine) {
+            map.removeLayer(previewLine);
+            previewLine = null;
+        }
+        document.getElementById('create-road-btn').style.display = 'inline-block';
+        document.getElementById('cancel-create-btn').style.display = 'none';
+        document.getElementById('create-tip').style.display = 'none';
+        map.getContainer().style.cursor = '';
+        stations.forEach(function(s) {
+            var m = stationMarkers[s.id];
+            if (m && m._icon) {
+                m._icon.classList.remove('create-mode-from');
+            }
+        });
+    }
+
+    function handleStationClick(stationId) {
+        if (!createRoadMode) return;
+
+        if (!fromStation) {
+            fromStation = stationId;
+            var fromS = getStationById(stationId);
+            document.getElementById('create-tip-text').textContent = '起点：' + fromS.code + ' - ' + fromS.name + '，请点击终点驿站';
+            var marker = stationMarkers[stationId];
+            if (marker && marker._icon) {
+                marker._icon.classList.add('create-mode-from');
+            }
+        } else if (fromStation == stationId) {
+            return;
+        } else {
+            var fromS = getStationById(fromStation);
+            var toS = getStationById(stationId);
+
+            var exists = roads.some(function(r) {
+                return (r.from.code == fromS.code && r.to.code == toS.code);
+            });
+            if (exists) {
+                alert('该道路已存在');
+                return;
+            }
+
+            showRoadFormModal(fromS, toS);
+        }
+    }
+
+    function showRoadFormModal(fromS, toS) {
+        document.getElementById('modal-road-name').textContent = fromS.code + ' - ' + fromS.name + ' → ' + toS.code + ' - ' + toS.name;
+        document.getElementById('modal-distance').value = 30;
+        document.getElementById('modal-slope').value = 0;
+        document.getElementById('modal-grade').value = 2;
+        document.getElementById('modal-error').classList.add('d-none');
+
+        var modal = new bootstrap.Modal(document.getElementById('roadFormModal'));
+        roadFormModal = modal;
+        modal.show();
+
+        document.getElementById('modal-submit-btn').onclick = function() {
+            submitRoad(fromS.id, toS.id);
+        };
+    }
+
+    function submitRoad(fromId, toId) {
+        var distance = parseFloat(document.getElementById('modal-distance').value);
+        var slope = parseFloat(document.getElementById('modal-slope').value || 0);
+        var grade = parseInt(document.getElementById('modal-grade').value);
+        var errorDiv = document.getElementById('modal-error');
+
+        if (!distance || distance <= 0) {
+            errorDiv.textContent = '道路长度必须大于0';
+            errorDiv.classList.remove('d-none');
+            return;
+        }
+
+        fetch('/api/roads/create/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            body: JSON.stringify({
+                from_station: fromId,
+                to_station: toId,
+                distance: distance,
+                slope: slope,
+                grade: grade,
+            }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                errorDiv.textContent = data.error;
+                errorDiv.classList.remove('d-none');
+            } else {
+                var newRoad = {
+                    id: data.id,
+                    from: { code: data.from.code, lat: getStationById(fromId).lat, lng: getStationById(fromId).lng },
+                    to: { code: data.to.code, lat: getStationById(toId).lat, lng: getStationById(toId).lng },
+                    distance: data.distance,
+                    slope: data.slope,
+                    grade: data.grade,
+                    grade_display: data.grade_display,
+                };
+                roads.push(newRoad);
+                weatherMap[data.id] = { type: 1, display: '晴朗', factor: 1.0 };
+                drawRoad(newRoad);
+
+                roadFormModal.hide();
+                cancelCreateRoad();
+                showToast('道路创建成功：' + data.from.code + ' → ' + data.to.code);
+            }
+        })
+        .catch(err => {
+            errorDiv.textContent = '创建失败：' + err.message;
+            errorDiv.classList.remove('d-none');
+        });
+    }
+
+    function getCookie(name) {
+        var value = '; ' + document.cookie;
+        var parts = value.split('; ' + name + '=');
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return '';
+    }
+
+    function showToast(message) {
+        var toast = document.createElement('div');
+        toast.className = 'alert alert-success position-fixed';
+        toast.style.cssText = 'top:20px;right:20px;z-index:9999;min-width:250px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        toast.innerHTML = '<i class="bi bi-check-circle-fill"></i> ' + message;
+        document.body.appendChild(toast);
+        setTimeout(function() { toast.remove(); }, 3000);
+    }
 </script>
 {% endblock %}

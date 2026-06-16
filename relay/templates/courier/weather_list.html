@@ -25,9 +25,14 @@
                 {% for record in weather_records %}
                 <tr>
                     <td>{{ record.road.from_station.code }} → {{ record.road.to_station.code }}</td>
-                    <td>{{ record.get_weather_type_display }}</td>
+                    <td>
+                        {{ record.get_weather_type_display }}
+                        {% if record.is_latest %}
+                        <span class="badge badge-safe ms-1">当前生效</span>
+                        {% endif %}
+                    </td>
                     <td><span class="badge bg-primary">{{ record.speed_factor }}</span></td>
-                    <td>{{ record.recorded_at }}</td>
+                    <td>{{ record.recorded_at|date:"Y-m-d H:i" }}</td>
                     <td>
                         <a href="{% url 'courier:weather_update' record.pk %}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
                         <a href="{% url 'courier:weather_delete' record.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>

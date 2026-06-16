@@ -38,6 +38,7 @@ urlpatterns = [
 
     path('api/stations/', views.api_stations, name='api_stations'),
     path('api/roads/', views.api_roads, name='api_roads'),
+    path('api/roads/create/', views.api_create_road, name='api_create_road'),
     path('api/strategies/', views.api_strategies, name='api_strategies'),
     path('api/calculate/', views.api_calculate_route, name='api_calculate_route'),
 ]

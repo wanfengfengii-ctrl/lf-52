@@ -99,11 +99,26 @@ def road_update(request, pk):
 
 def road_delete(request, pk):
     road = get_object_or_404(Road, pk=pk)
+    affected_task_ids = list(
+        DeliverySegment.objects.filter(road_id=pk).values_list('task_id', flat=True).distinct()
+    )
     if request.method == 'POST':
         road.delete()
-        messages.success(request, '道路已删除')
+        for task_id in affected_task_ids:
+            try:
+                task = DeliveryTask.objects.get(pk=task_id)
+                calculate_delivery_time(task, force_recalculate=True)
+                if task.status == 'executable':
+                    task.status = 'draft'
+                    task.save()
+            except DeliveryTask.DoesNotExist:
+                pass
+        if affected_task_ids:
+            messages.warning(request, f'道路已删除，已重新计算 {len(affected_task_ids)} 个相关任务，可执行任务已重置为草稿')
+        else:
+            messages.success(request, '道路已删除')
         return redirect('courier:road_list')
-    return render(request, 'courier/road_confirm_delete.html', {'road': road})
+    return render(request, 'courier/road_confirm_delete.html', {'road': road, 'affected_count': len(affected_task_ids)})
 
 
 def strategy_list(request):
@@ -147,6 +162,11 @@ def strategy_delete(request, pk):
 
 def weather_list(request):
     weather_records = WeatherRecord.objects.select_related('road', 'road__from_station', 'road__to_station').all()
+    latest_per_road = {}
+    for record in weather_records:
+        if record.road_id not in latest_per_road:
+            latest_per_road[record.road_id] = record.pk
+        record.is_latest = (record.pk == latest_per_road[record.road_id])
     return render(request, 'courier/weather_list.html', {'weather_records': weather_records})
 
 
@@ -169,7 +189,10 @@ def weather_update(request, pk):
     if request.method == 'POST':
         form = WeatherRecordForm(request.POST, instance=weather)
         if form.is_valid():
-            weather = form.save()
+            weather = form.save(commit=False)
+            from django.utils import timezone
+            weather.recorded_at = timezone.now()
+            weather.save()
             recalculate_affected_tasks(weather.road_id)
             if old_road_id != weather.road_id:
                 recalculate_affected_tasks(old_road_id)
@@ -384,6 +407,61 @@ def api_strategies(request):
         for s in strategies
     ]
     return JsonResponse(data, safe=False)
+
+
+def api_create_road(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': '仅支持 POST 请求'}, status=405)
+
+    import json
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': '无效的 JSON 数据'}, status=400)
+
+    from_station_id = body.get('from_station')
+    to_station_id = body.get('to_station')
+    distance = body.get('distance')
+    slope = body.get('slope', 0)
+    grade = body.get('grade', 2)
+
+    if not from_station_id or not to_station_id:
+        return JsonResponse({'error': '需要指定起点和终点驿站'}, status=400)
+
+    if not distance or float(distance) <= 0:
+        return JsonResponse({'error': '道路长度必须大于0'}, status=400)
+
+    if from_station_id == to_station_id:
+        return JsonResponse({'error': '起点和终点不能相同'}, status=400)
+
+    if Road.objects.filter(from_station_id=from_station_id, to_station_id=to_station_id).exists():
+        return JsonResponse({'error': '该道路已存在'}, status=400)
+
+    try:
+        from_station = Station.objects.get(pk=from_station_id)
+        to_station = Station.objects.get(pk=to_station_id)
+    except Station.DoesNotExist:
+        return JsonResponse({'error': '驿站不存在'}, status=404)
+
+    road = Road.objects.create(
+        from_station=from_station,
+        to_station=to_station,
+        distance=float(distance),
+        slope=float(slope),
+        grade=int(grade),
+    )
+
+    WeatherRecord.objects.create(road=road, weather_type=1)
+
+    return JsonResponse({
+        'id': road.pk,
+        'from': {'code': from_station.code, 'name': from_station.name},
+        'to': {'code': to_station.code, 'name': to_station.name},
+        'distance': road.distance,
+        'slope': road.slope,
+        'grade': road.grade,
+        'grade_display': road.get_grade_display(),
+    })
 
 
 def api_calculate_route(request):
