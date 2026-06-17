@@ -62,23 +62,54 @@ class StationQueue:
         return max(0.01, base * priority_factor)
 
     def queue_sort_key(self, item):
-        priority, arrival_order, sim_task_obj, visit_record = item
+        priority, arrival_order, weighted_key, sim_task_obj, visit_record = item
         if self.queue_rule == 'fifo':
             return (arrival_order,)
         elif self.queue_rule == 'priority_strict':
             return (-priority, arrival_order)
         elif self.queue_rule == 'priority_weighted':
-            rand_weight = {1: 3, 2: 2, 3: 1}.get(priority, 3)
-            return (rand_weight, arrival_order)
+            return (weighted_key, arrival_order)
         elif self.queue_rule == 'priority_class':
             return (-priority, arrival_order)
         else:
             return (arrival_order,)
 
+    def _generate_weighted_key(self, priority):
+        weight_map = {1: 1.0, 2: 4.0, 3: 10.0}
+        w = weight_map.get(priority, 1.0)
+        r = random.random()
+        return -(r ** (1.0 / w))
+
+    def _jump_success_prob(self, priority):
+        prob_map = {1: 0.2, 2: 0.65, 3: 0.88}
+        return prob_map.get(priority, 0.1)
+
     def add_to_queue(self, priority, arrival_order, sim_task_obj, visit_record):
-        item = (priority, arrival_order, sim_task_obj, visit_record)
-        self.queue.append(item)
-        self.queue.sort(key=self.queue_sort_key)
+        weighted_key = self._generate_weighted_key(priority)
+        item = (priority, arrival_order, weighted_key, sim_task_obj, visit_record)
+
+        if self.queue_rule == 'priority_weighted':
+            self.queue.append(item)
+            pos = len(self.queue) - 1
+            jump_prob = self._jump_success_prob(priority)
+            total_jumps = 0
+            while pos > 0:
+                prev_priority = self.queue[pos - 1][0]
+                if prev_priority < priority:
+                    if random.random() < jump_prob:
+                        self.queue[pos], self.queue[pos - 1] = self.queue[pos - 1], self.queue[pos]
+                        pos -= 1
+                        total_jumps += 1
+                    else:
+                        break
+                else:
+                    break
+            visit_record['jump_count'] = total_jumps
+        else:
+            self.queue.append(item)
+            self.queue.sort(key=self.queue_sort_key)
+            visit_record['jump_count'] = 0
+
         self.visit_count += 1
         if len(self.queue) > self.max_queue_length:
             self.max_queue_length = len(self.queue)
@@ -91,7 +122,7 @@ class StationQueue:
         started = []
         while self.queue and self.busy_windows < eff_windows:
             item = self.queue.pop(0)
-            priority, arrival_order, sim_task_obj, visit_record = item
+            priority, arrival_order, weighted_key, sim_task_obj, visit_record = item
             self.busy_windows += 1
             started.append(item)
         return started
@@ -345,7 +376,7 @@ class QueueSimulationEngine:
 
                 started_items = sq.try_start_processing(current_time)
                 for s_item in started_items:
-                    s_priority, s_order, s_task_obj, s_visit = s_item
+                    s_priority, s_order, s_wkey, s_task_obj, s_visit = s_item
                     s_process_time = sq.effective_process_time(current_time, s_priority)
                     s_visit['process_start_time'] = round(current_time, 3)
                     s_visit['wait_duration'] = round(current_time - s_visit['queue_enter_time'], 3)
@@ -411,7 +442,7 @@ class QueueSimulationEngine:
 
                 next_started = sq.try_start_processing(current_time)
                 for ns_item in next_started:
-                    ns_priority, ns_order, ns_task_obj, ns_visit = ns_item
+                    ns_priority, ns_order, ns_wkey, ns_task_obj, ns_visit = ns_item
                     ns_process_time = sq.effective_process_time(current_time, ns_priority)
                     ns_visit['process_start_time'] = round(current_time, 3)
                     ns_visit['wait_duration'] = round(current_time - ns_visit['queue_enter_time'], 3)

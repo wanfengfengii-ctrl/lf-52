@@ -20,7 +20,7 @@
     <div class="col-md-3">
         <div class="card stat-card">
             <div class="stat-number" style="color: var(--relay-success);">
-                {{ simulations_completed|default:0 }}
+                {{ count_completed }}
             </div>
             <div class="stat-label">已完成仿真</div>
         </div>
@@ -28,7 +28,7 @@
     <div class="col-md-3">
         <div class="card stat-card">
             <div class="stat-number" style="color: var(--relay-primary);">
-                {{ simulations_running|default:0 }}
+                {{ count_running }}
             </div>
             <div class="stat-label">运行中</div>
         </div>
@@ -36,7 +36,7 @@
     <div class="col-md-3">
         <div class="card stat-card">
             <div class="stat-number" style="color: var(--relay-danger);">
-                {{ simulations_failed|default:0 }}
+                {{ count_failed }}
             </div>
             <div class="stat-label">运行失败</div>
         </div>

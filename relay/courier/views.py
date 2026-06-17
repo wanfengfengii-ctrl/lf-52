@@ -667,8 +667,16 @@ def api_segment_config(request, task_pk, segment_pk):
 
 
 def simulation_list(request):
-    simulations = SimulationRun.objects.all()
-    return render(request, 'courier/simulation_list.html', {'simulations': simulations})
+    simulations = SimulationRun.objects.all().order_by('-created_at')
+    count_completed = SimulationRun.objects.filter(status='completed').count()
+    count_running = SimulationRun.objects.filter(status='running').count()
+    count_failed = SimulationRun.objects.filter(status='failed').count()
+    return render(request, 'courier/simulation_list.html', {
+        'simulations': simulations,
+        'count_completed': count_completed,
+        'count_running': count_running,
+        'count_failed': count_failed,
+    })
 
 
 def simulation_create(request):
