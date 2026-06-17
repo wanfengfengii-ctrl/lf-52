@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+
+{% block title %}封锁事件管理 - 驿站文书递送模拟系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-shield-lock"></i> 封锁事件管理</h2>
+    <a href="{% url 'courier:blockade_event_create' %}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> 新建封锁事件
+    </a>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number">{{ events|length }}</div>
+            <div class="stat-label">封锁事件总数</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number" style="color: var(--relay-danger);">{{ count_road_blocked }}</div>
+            <div class="stat-label">道路封锁</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number" style="color: var(--relay-secondary);">{{ count_road_restricted }}</div>
+            <div class="stat-label">半封闭限流</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card stat-card">
+            <div class="stat-number" style="color: var(--relay-primary);">{{ count_station_down }}</div>
+            <div class="stat-label">驿站停摆</div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">封锁事件列表</div>
+    <div class="card-body p-0">
+        {% if events %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>事件类型</th>
+                        <th>名称</th>
+                        <th>影响对象</th>
+                        <th>时间段(时辰)</th>
+                        <th>严重程度</th>
+                        <th>通行率</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in events %}
+                    <tr>
+                        <td>#{{ event.pk }}</td>
+                        <td>
+                            {% if event.event_type == 'road_blocked' %}
+                            <span class="badge bg-danger">道路封锁</span>
+                            {% elif event.event_type == 'road_restricted' %}
+                            <span class="badge bg-warning text-dark">半封闭限流</span>
+                            {% elif event.event_type == 'station_down' %}
+                            <span class="badge bg-dark">驿站停摆</span>
+                            {% elif event.event_type == 'military_priority' %}
+                            <span class="badge bg-info">军务优先通行</span>
+                            {% endif %}
+                        </td>
+                        <td><strong>{{ event.name }}</strong></td>
+                        <td>
+                            {% if event.road %}
+                            <i class="bi bi-signpost-split"></i> {{ event.road }}
+                            {% elif event.station %}
+                            <i class="bi bi-building"></i> {{ event.station }}
+                            {% endif %}
+                        </td>
+                        <td>{{ event.start_hour }} - {{ event.end_hour }}</td>
+                        <td>
+                            <div class="progress" style="height: 20px; min-width: 80px;">
+                                <div class="progress-bar {% if event.severity >= 7 %}bg-danger{% elif event.severity >= 4 %}bg-warning{% else %}bg-success{% endif %}"
+                                     style="width: {{ event.severity|floatformat:0 }}0%;">{{ event.severity }}</div>
+                            </div>
+                        </td>
+                        <td>
+                            {% if event.flow_rate == 0 %}
+                            <span class="badge bg-danger">完全封锁</span>
+                            {% else %}
+                            <span class="badge bg-info">{{ event.flow_rate|floatformat:2 }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'courier:blockade_event_update' event.pk %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="post" action="{% url 'courier:blockade_event_delete' event.pk %}" class="d-inline" onsubmit="return confirm('确定删除此封锁事件？');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-shield-lock" style="font-size: 3rem;"></i>
+            <p class="mt-3">暂无封锁事件，点击右上角「新建封锁事件」开始</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

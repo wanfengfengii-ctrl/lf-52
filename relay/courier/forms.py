@@ -1,7 +1,7 @@
 import json
 from django import forms
 from .models import Station, Road, HorseChangeStrategy, WeatherRecord, DeliveryTask, DeliverySegment
-from .models import StationPeakHour, SimulationRun
+from .models import StationPeakHour, SimulationRun, RoadBlockadeEvent, BlockadeDrill
 
 
 class BootstrapFormMixin:
@@ -162,3 +162,45 @@ class DeliveryTaskStatusForm(BootstrapFormMixin, forms.ModelForm):
         if status == 'executable' and self.instance and self.instance.has_high_risk:
             raise forms.ValidationError('存在高风险断点，不能标记为可执行')
         return status
+
+
+class RoadBlockadeEventForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = RoadBlockadeEvent
+        fields = ['event_type', 'name', 'description', 'road', 'station', 'start_hour', 'end_hour',
+                  'severity', 'flow_rate', 'reroute_cost_multiplier', 'military_priority_level']
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        event_type = cleaned_data.get('event_type')
+        road = cleaned_data.get('road')
+        station = cleaned_data.get('station')
+        if event_type in ('road_blocked', 'road_restricted') and not road:
+            raise forms.ValidationError('道路封锁/限流事件必须指定影响道路')
+        if event_type == 'station_down' and not station:
+            raise forms.ValidationError('驿站停摆事件必须指定影响驿站')
+        if not road and not station:
+            raise forms.ValidationError('必须指定影响道路或影响驿站')
+        start = cleaned_data.get('start_hour')
+        end = cleaned_data.get('end_hour')
+        if start is not None and end is not None and start >= end:
+            raise forms.ValidationError('开始时间必须早于结束时间')
+        return cleaned_data
+
+
+class BlockadeDrillForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = BlockadeDrill
+        fields = ['name', 'description', 'base_simulation']
+        widgets = {
+            'description': forms.Textarea(attrs={'rows': 3}),
+        }
+
+    def clean_base_simulation(self):
+        sim = self.cleaned_data.get('base_simulation')
+        if sim and sim.status != 'completed':
+            raise forms.ValidationError('基准仿真必须已完成运行')
+        return sim

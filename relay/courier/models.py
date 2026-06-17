@@ -395,6 +395,99 @@ class SimStationSnapshot(models.Model):
         ordering = ['simulation', 'station_id', 'snapshot_time']
 
 
+class RoadBlockadeEvent(models.Model):
+    EVENT_TYPE_CHOICES = [
+        ('road_blocked', '道路封锁'),
+        ('road_restricted', '半封闭限流'),
+        ('station_down', '驿站停摆'),
+        ('military_priority', '军务优先通行'),
+    ]
+    event_type = models.CharField(max_length=25, choices=EVENT_TYPE_CHOICES, verbose_name='事件类型')
+    name = models.CharField(max_length=200, verbose_name='事件名称')
+    description = models.TextField(blank=True, default='', verbose_name='描述')
+    road = models.ForeignKey(Road, on_delete=models.CASCADE, null=True, blank=True, related_name='blockade_events', verbose_name='影响道路')
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, null=True, blank=True, related_name='blockade_events', verbose_name='影响驿站')
+    start_hour = models.FloatField(verbose_name='开始时间（时辰，0-24）')
+    end_hour = models.FloatField(verbose_name='结束时间（时辰，0-24）')
+    severity = models.FloatField(default=1.0, verbose_name='严重程度（1-10）')
+    flow_rate = models.FloatField(default=0.0, verbose_name='通行率（0=完全封锁，1=正常通行）')
+    reroute_cost_multiplier = models.FloatField(default=1.0, verbose_name='改道成本倍率')
+    military_priority_level = models.IntegerField(default=3, verbose_name='军务优先等级（1-3）')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = '封锁事件'
+        verbose_name_plural = '封锁事件'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_event_type_display()} - {self.name}'
+
+    def clean(self):
+        super().clean()
+        if self.start_hour < 0 or self.start_hour >= 24:
+            raise ValidationError({'start_hour': '开始时间必须在 0-24 时辰之间'})
+        if self.end_hour <= 0 or self.end_hour > 24:
+            raise ValidationError({'end_hour': '结束时间必须在 0-24 时辰之间'})
+        if self.start_hour >= self.end_hour:
+            raise ValidationError('开始时间必须早于结束时间')
+        if self.severity < 1 or self.severity > 10:
+            raise ValidationError({'severity': '严重程度必须在 1-10 之间'})
+        if self.flow_rate < 0 or self.flow_rate > 1:
+            raise ValidationError({'flow_rate': '通行率必须在 0-1 之间'})
+        if not self.road_id and not self.station_id:
+            raise ValidationError('必须指定影响道路或影响驿站')
+        if self.event_type in ('road_blocked', 'road_restricted') and not self.road_id:
+            raise ValidationError('道路封锁/限流事件必须指定影响道路')
+        if self.event_type == 'station_down' and not self.station_id:
+            raise ValidationError('驿站停摆事件必须指定影响驿站')
+
+
+class BlockadeDrill(models.Model):
+    STATUS_CHOICES = [
+        ('pending', '待推演'),
+        ('running', '推演中'),
+        ('completed', '已完成'),
+        ('failed', '推演失败'),
+    ]
+    name = models.CharField(max_length=200, verbose_name='推演名称')
+    description = models.TextField(blank=True, default='', verbose_name='描述')
+    base_simulation = models.ForeignKey(SimulationRun, on_delete=models.CASCADE, related_name='blockade_drills', verbose_name='基准仿真')
+    blockade_events = models.ManyToManyField(RoadBlockadeEvent, related_name='drills', verbose_name='封锁事件')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='状态')
+
+    before_avg_wait = models.FloatField(null=True, blank=True, verbose_name='封锁前平均等待(时辰)')
+    before_max_wait = models.FloatField(null=True, blank=True, verbose_name='封锁前最大等待(时辰)')
+    before_avg_total = models.FloatField(null=True, blank=True, verbose_name='封锁前平均送达(时辰)')
+    before_delay_count = models.IntegerField(null=True, blank=True, verbose_name='封锁前延误数')
+    before_bottleneck_codes = models.JSONField(default=list, verbose_name='封锁前瓶颈驿站列表')
+
+    after_avg_wait = models.FloatField(null=True, blank=True, verbose_name='封锁后平均等待(时辰)')
+    after_max_wait = models.FloatField(null=True, blank=True, verbose_name='封锁后最大等待(时辰)')
+    after_avg_total = models.FloatField(null=True, blank=True, verbose_name='封锁后平均送达(时辰)')
+    after_delay_count = models.IntegerField(null=True, blank=True, verbose_name='封锁后延误数')
+    after_bottleneck_codes = models.JSONField(default=list, verbose_name='封锁后瓶颈驿站列表')
+
+    reroute_cost_total = models.FloatField(default=0.0, verbose_name='总改道成本')
+    affected_task_count = models.IntegerField(default=0, verbose_name='受影响任务数')
+    congestion_transfer = models.JSONField(default=dict, verbose_name='拥堵转移数据')
+    impact_timeline = models.JSONField(default=list, verbose_name='事件影响时间轴')
+    recovery_strategies = models.JSONField(default=list, verbose_name='恢复策略建议')
+    bottleneck_diff = models.JSONField(default=dict, verbose_name='瓶颈变化对比')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default='', verbose_name='错误信息')
+
+    class Meta:
+        verbose_name = '封锁推演'
+        verbose_name_plural = '封锁推演'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'推演: {self.name}'
+
+
 class SimBottleneckStation(models.Model):
     simulation = models.ForeignKey(SimulationRun, on_delete=models.CASCADE, related_name='bottleneck_stations', verbose_name='仿真运行')
     station_id = models.IntegerField(verbose_name='驿站ID')

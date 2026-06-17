@@ -7,11 +7,13 @@ from .models import (
     Station, Road, HorseChangeStrategy, WeatherRecord,
     DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment,
     SimulationRun, SimTask, SimStationVisit, SimBottleneckStation, StationPeakHour,
+    RoadBlockadeEvent, BlockadeDrill,
 )
 from .forms import (
     StationForm, RoadForm, HorseChangeStrategyForm,
     WeatherRecordForm, DeliveryTaskForm, DeliveryTaskStatusForm,
     DeliverySegmentForm, SimulationRunForm, StationPeakHourForm,
+    RoadBlockadeEventForm, BlockadeDrillForm,
 )
 from .engine import (
     calculate_delivery_time, recalculate_affected_tasks,
@@ -20,6 +22,7 @@ from .engine import (
     find_all_paths,
 )
 from .simulation_engine import run_simulation, get_simulation_result_data
+from .blockade_engine import run_blockade_drill, get_blockade_drill_data
 
 
 def index(request):
@@ -805,3 +808,145 @@ def api_simulation_result(request, pk):
         'priority_analysis': result_data['priority_analysis'],
         'time_fluctuation': result_data['time_fluctuation'],
     })
+
+
+def blockade_event_list(request):
+    events = RoadBlockadeEvent.objects.select_related('road', 'road__from_station', 'road__to_station', 'station').all()
+    count_road_blocked = events.filter(event_type='road_blocked').count()
+    count_road_restricted = events.filter(event_type='road_restricted').count()
+    count_station_down = events.filter(event_type='station_down').count()
+    count_military = events.filter(event_type='military_priority').count()
+    return render(request, 'courier/blockade_event_list.html', {
+        'events': events,
+        'count_road_blocked': count_road_blocked,
+        'count_road_restricted': count_road_restricted,
+        'count_station_down': count_station_down,
+        'count_military': count_military,
+    })
+
+
+def blockade_event_create(request):
+    if request.method == 'POST':
+        form = RoadBlockadeEventForm(request.POST)
+        if form.is_valid():
+            event = form.save()
+            messages.success(request, f'封锁事件「{event.name}」创建成功')
+            return redirect('courier:blockade_event_list')
+    else:
+        form = RoadBlockadeEventForm()
+    return render(request, 'courier/blockade_event_form.html', {'form': form, 'title': '新建封锁事件'})
+
+
+def blockade_event_update(request, pk):
+    event = get_object_or_404(RoadBlockadeEvent, pk=pk)
+    if request.method == 'POST':
+        form = RoadBlockadeEventForm(request.POST, instance=event)
+        if form.is_valid():
+            form.save()
+            messages.success(request, '封锁事件更新成功')
+            return redirect('courier:blockade_event_list')
+    else:
+        form = RoadBlockadeEventForm(instance=event)
+    return render(request, 'courier/blockade_event_form.html', {'form': form, 'title': '编辑封锁事件'})
+
+
+def blockade_event_delete(request, pk):
+    event = get_object_or_404(RoadBlockadeEvent, pk=pk)
+    if request.method == 'POST':
+        event.delete()
+        messages.success(request, '封锁事件已删除')
+        return redirect('courier:blockade_event_list')
+    return render(request, 'courier/blockade_event_confirm_delete.html', {'event': event})
+
+
+def blockade_drill_list(request):
+    drills = BlockadeDrill.objects.select_related('base_simulation').all()
+    count_completed = BlockadeDrill.objects.filter(status='completed').count()
+    count_running = BlockadeDrill.objects.filter(status='running').count()
+    count_failed = BlockadeDrill.objects.filter(status='failed').count()
+    return render(request, 'courier/blockade_drill_list.html', {
+        'drills': drills,
+        'count_completed': count_completed,
+        'count_running': count_running,
+        'count_failed': count_failed,
+    })
+
+
+def blockade_drill_create(request):
+    if request.method == 'POST':
+        form = BlockadeDrillForm(request.POST)
+        if form.is_valid():
+            drill = form.save(commit=False)
+            drill.save()
+            event_ids = request.POST.getlist('blockade_events')
+            if event_ids:
+                events = RoadBlockadeEvent.objects.filter(pk__in=event_ids)
+                drill.blockade_events.set(events)
+            messages.success(request, f'封锁推演「{drill.name}」创建成功')
+            return redirect('courier:blockade_drill_detail', pk=drill.pk)
+    else:
+        form = BlockadeDrillForm()
+    all_events = RoadBlockadeEvent.objects.all()
+    completed_sims = SimulationRun.objects.filter(status='completed')
+    return render(request, 'courier/blockade_drill_form.html', {
+        'form': form,
+        'title': '新建封锁推演',
+        'all_events': all_events,
+        'completed_sims': completed_sims,
+    })
+
+
+def blockade_drill_detail(request, pk):
+    drill = get_object_or_404(BlockadeDrill, pk=pk)
+    context = {
+        'drill': drill,
+        'blockade_events': drill.blockade_events.all(),
+    }
+    if drill.status == 'completed':
+        drill_data = get_blockade_drill_data(pk)
+        context.update({
+            'drill_data_json': json.dumps(drill_data, ensure_ascii=False),
+            'comparison': drill_data['comparison'],
+            'bottleneck_diff': drill_data['bottleneck_diff'],
+            'recovery_strategies': drill_data['recovery_strategies'],
+            'impact_timeline': drill_data['impact_timeline'],
+            'congestion_transfer': drill_data['congestion_transfer'],
+        })
+    return render(request, 'courier/blockade_drill_detail.html', context)
+
+
+def blockade_drill_run(request, pk):
+    drill = get_object_or_404(BlockadeDrill, pk=pk)
+    if drill.status == 'running':
+        messages.warning(request, '该推演正在运行中，请稍候')
+        return redirect('courier:blockade_drill_detail', pk=pk)
+    if drill.base_simulation.status != 'completed':
+        messages.error(request, '基准仿真尚未完成，请先运行基准仿真')
+        return redirect('courier:blockade_drill_detail', pk=pk)
+    if not drill.blockade_events.exists():
+        messages.error(request, '请至少添加一个封锁事件')
+        return redirect('courier:blockade_drill_detail', pk=pk)
+
+    result = run_blockade_drill(pk)
+    if result['success']:
+        messages.success(request, '封锁推演运行完成！')
+    else:
+        messages.error(request, f'封锁推演失败：{result.get("error", "未知错误")}')
+    return redirect('courier:blockade_drill_detail', pk=pk)
+
+
+def blockade_drill_delete(request, pk):
+    drill = get_object_or_404(BlockadeDrill, pk=pk)
+    if request.method == 'POST':
+        drill.delete()
+        messages.success(request, '封锁推演已删除')
+        return redirect('courier:blockade_drill_list')
+    return render(request, 'courier/blockade_drill_confirm_delete.html', {'drill': drill})
+
+
+def api_blockade_drill_result(request, pk):
+    drill = get_object_or_404(BlockadeDrill, pk=pk)
+    if drill.status != 'completed':
+        return JsonResponse({'error': '推演尚未完成'}, status=400)
+    drill_data = get_blockade_drill_data(pk)
+    return JsonResponse(drill_data)

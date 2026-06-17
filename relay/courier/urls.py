@@ -47,6 +47,17 @@ urlpatterns = [
     path('peak-hours/<int:pk>/update/', views.peak_hour_update, name='peak_hour_update'),
     path('peak-hours/<int:pk>/delete/', views.peak_hour_delete, name='peak_hour_delete'),
 
+    path('blockade-events/', views.blockade_event_list, name='blockade_event_list'),
+    path('blockade-events/create/', views.blockade_event_create, name='blockade_event_create'),
+    path('blockade-events/<int:pk>/update/', views.blockade_event_update, name='blockade_event_update'),
+    path('blockade-events/<int:pk>/delete/', views.blockade_event_delete, name='blockade_event_delete'),
+
+    path('blockade-drills/', views.blockade_drill_list, name='blockade_drill_list'),
+    path('blockade-drills/create/', views.blockade_drill_create, name='blockade_drill_create'),
+    path('blockade-drills/<int:pk>/', views.blockade_drill_detail, name='blockade_drill_detail'),
+    path('blockade-drills/<int:pk>/run/', views.blockade_drill_run, name='blockade_drill_run'),
+    path('blockade-drills/<int:pk>/delete/', views.blockade_drill_delete, name='blockade_drill_delete'),
+
     path('api/stations/', views.api_stations, name='api_stations'),
     path('api/roads/', views.api_roads, name='api_roads'),
     path('api/roads/create/', views.api_create_road, name='api_create_road'),
@@ -55,4 +66,5 @@ urlpatterns = [
     path('api/tasks/<int:pk>/plans/', views.api_task_plans, name='api_task_plans'),
     path('api/tasks/<int:task_pk>/segments/<int:segment_pk>/', views.api_segment_config, name='api_segment_config'),
     path('api/simulations/<int:pk>/result/', views.api_simulation_result, name='api_simulation_result'),
+    path('api/blockade-drills/<int:pk>/result/', views.api_blockade_drill_result, name='api_blockade_drill_result'),
 ]

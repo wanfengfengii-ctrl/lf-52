@@ -1,0 +1,580 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ drill.name }} - 封锁推演详情{% endblock %}
+
+{% block extra_head %}
+<style>
+    .comparison-card { border-left: 4px solid var(--relay-secondary); }
+    .comparison-card.worse { border-left-color: var(--relay-danger); background: linear-gradient(90deg, rgba(198,40,40,0.06) 0%, transparent 40%); }
+    .comparison-card.better { border-left-color: var(--relay-success); background: linear-gradient(90deg, rgba(46,125,50,0.06) 0%, transparent 40%); }
+    .timeline-event { border-left: 3px solid var(--relay-secondary); padding-left: 1rem; margin-bottom: 1rem; }
+    .timeline-event.critical { border-left-color: var(--relay-danger); }
+    .timeline-event.warning { border-left-color: #F57F17; }
+    .timeline-event.info { border-left-color: #1565C0; }
+    .strategy-card { border-left: 4px solid var(--relay-accent); }
+    .strategy-card.critical { border-left-color: var(--relay-danger); border-left-width: 6px; }
+    .strategy-card.high { border-left-color: #E65100; }
+    .strategy-card.medium { border-left-color: #F57F17; }
+    .strategy-card.low { border-left-color: var(--relay-success); }
+    .chart-container { position: relative; height: 320px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-shield-exclamation"></i> {{ drill.name }}</h2>
+    <div>
+        <a href="{% url 'courier:blockade_drill_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+        {% if drill.status != 'running' %}
+        <form method="post" action="{% url 'courier:blockade_drill_run' drill.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-play-circle"></i>
+                {% if drill.status == 'completed' %}重新推演{% else %}开始推演{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label mb-1">状态</div>
+            <div>
+                {% if drill.status == 'pending' %}
+                <span class="badge bg-secondary fs-6">待推演</span>
+                {% elif drill.status == 'running' %}
+                <span class="badge bg-primary fs-6">推演中</span>
+                {% elif drill.status == 'completed' %}
+                <span class="badge bg-success fs-6">已完成</span>
+                {% elif drill.status == 'failed' %}
+                <span class="badge bg-danger fs-6">失败</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label">封锁事件数</div>
+            <div class="stat-number" style="font-size: 2rem;">{{ blockade_events|length }}</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label">受影响任务</div>
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-danger);">{{ drill.affected_task_count|default:0 }}</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label">改道成本</div>
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-secondary);">{{ drill.reroute_cost_total|default:"-" }}</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label">基准仿真</div>
+            <div>
+                <a href="{% url 'courier:simulation_detail' drill.base_simulation.pk %}" class="btn btn-sm btn-outline-primary">
+                    #{{ drill.base_simulation.pk }}
+                </a>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label">创建时间</div>
+            <div style="font-size: 0.9rem;">{{ drill.created_at|date:"m-d H:i" }}</div>
+        </div>
+    </div>
+</div>
+
+{% if drill.status == 'failed' %}
+<div class="alert alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle"></i> <strong>推演失败：</strong>{{ drill.error_message }}
+</div>
+{% endif %}
+
+{% if drill.status != 'completed' %}
+<div class="card text-center py-5">
+    <div class="card-body">
+        <i class="bi bi-shield-exclamation text-muted" style="font-size: 4rem;"></i>
+        <h4 class="mt-3 text-muted">
+            {% if drill.status == 'running' %}推演正在运行中，请稍候...{% else %}暂无推演结果数据{% endif %}
+        </h4>
+        {% if drill.status == 'pending' %}
+        <p class="text-muted">点击右上角「开始推演」按钮运行封锁推演</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if blockade_events %}
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-shield-lock"></i> 封锁事件列表</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr><th>类型</th><th>名称</th><th>影响对象</th><th>时间段</th><th>严重程度</th></tr>
+            </thead>
+            <tbody>
+                {% for event in blockade_events %}
+                <tr>
+                    <td>
+                        {% if event.event_type == 'road_blocked' %}
+                        <span class="badge bg-danger">道路封锁</span>
+                        {% elif event.event_type == 'road_restricted' %}
+                        <span class="badge bg-warning text-dark">半封闭限流</span>
+                        {% elif event.event_type == 'station_down' %}
+                        <span class="badge bg-dark">驿站停摆</span>
+                        {% elif event.event_type == 'military_priority' %}
+                        <span class="badge bg-info">军务优先通行</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ event.name }}</td>
+                    <td>{% if event.road %}{{ event.road }}{% elif event.station %}{{ event.station }}{% endif %}</td>
+                    <td>{{ event.start_hour }} - {{ event.end_hour }} 时</td>
+                    <td>{{ event.severity }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% else %}
+
+{% if blockade_events %}
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-shield-lock"></i> 封锁事件列表</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr><th>类型</th><th>名称</th><th>影响对象</th><th>时间段</th><th>严重程度</th><th>通行率</th></tr>
+            </thead>
+            <tbody>
+                {% for event in blockade_events %}
+                <tr>
+                    <td>
+                        {% if event.event_type == 'road_blocked' %}
+                        <span class="badge bg-danger">道路封锁</span>
+                        {% elif event.event_type == 'road_restricted' %}
+                        <span class="badge bg-warning text-dark">半封闭限流</span>
+                        {% elif event.event_type == 'station_down' %}
+                        <span class="badge bg-dark">驿站停摆</span>
+                        {% elif event.event_type == 'military_priority' %}
+                        <span class="badge bg-info">军务优先通行</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ event.name }}</td>
+                    <td>{% if event.road %}<i class="bi bi-signpost-split"></i> {{ event.road }}{% elif event.station %}<i class="bi bi-building"></i> {{ event.station }}{% endif %}</td>
+                    <td>{{ event.start_hour }} - {{ event.end_hour }} 时</td>
+                    <td>
+                        <div class="progress" style="height: 18px; min-width: 60px;">
+                            <div class="progress-bar {% if event.severity >= 7 %}bg-danger{% elif event.severity >= 4 %}bg-warning{% else %}bg-success{% endif %}"
+                                 style="width: {{ event.severity|floatformat:0 }}0%;">{{ event.severity }}</div>
+                        </div>
+                    </td>
+                    <td>{% if event.flow_rate == 0 %}<span class="badge bg-danger">完全封锁</span>{% else %}{{ event.flow_rate }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-arrow-left-right"></i> 封锁前后时效对比</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="comparisonChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-bar-chart-line"></i> 关键指标变化</div>
+            <div class="card-body">
+                {% if comparison %}
+                <div class="row g-3">
+                    <div class="col-6">
+                        <div class="card comparison-card {% if comparison.wait_comparison.diff > 0 %}worse{% else %}better{% endif %}">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-muted small">平均等待时长</div>
+                                <div class="d-flex justify-content-center align-items-baseline gap-2">
+                                    <span class="text-muted" style="text-decoration:line-through;">{{ comparison.wait_comparison.before|floatformat:2 }}</span>
+                                    <i class="bi bi-arrow-right small"></i>
+                                    <strong class="fs-5 {% if comparison.wait_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {{ comparison.wait_comparison.after|floatformat:2 }}
+                                    </strong>
+                                </div>
+                                <div class="{% if comparison.wait_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %} small">
+                                    {% if comparison.wait_comparison.diff > 0 %}+{% endif %}{{ comparison.wait_comparison.diff|floatformat:3 }} 时辰
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card comparison-card {% if comparison.max_wait_comparison.diff > 0 %}worse{% else %}better{% endif %}">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-muted small">最大等待时长</div>
+                                <div class="d-flex justify-content-center align-items-baseline gap-2">
+                                    <span class="text-muted" style="text-decoration:line-through;">{{ comparison.max_wait_comparison.before|floatformat:2 }}</span>
+                                    <i class="bi bi-arrow-right small"></i>
+                                    <strong class="fs-5 {% if comparison.max_wait_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {{ comparison.max_wait_comparison.after|floatformat:2 }}
+                                    </strong>
+                                </div>
+                                <div class="{% if comparison.max_wait_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %} small">
+                                    {% if comparison.max_wait_comparison.diff > 0 %}+{% endif %}{{ comparison.max_wait_comparison.diff|floatformat:3 }} 时辰
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card comparison-card {% if comparison.total_comparison.diff > 0 %}worse{% else %}better{% endif %}">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-muted small">平均送达时长</div>
+                                <div class="d-flex justify-content-center align-items-baseline gap-2">
+                                    <span class="text-muted" style="text-decoration:line-through;">{{ comparison.total_comparison.before|floatformat:2 }}</span>
+                                    <i class="bi bi-arrow-right small"></i>
+                                    <strong class="fs-5 {% if comparison.total_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {{ comparison.total_comparison.after|floatformat:2 }}
+                                    </strong>
+                                </div>
+                                <div class="{% if comparison.total_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %} small">
+                                    {% if comparison.total_comparison.diff > 0 %}+{% endif %}{{ comparison.total_comparison.diff|floatformat:3 }} 时辰
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="card comparison-card {% if comparison.delay_comparison.diff > 0 %}worse{% else %}better{% endif %}">
+                            <div class="card-body p-3 text-center">
+                                <div class="text-muted small">延误任务数</div>
+                                <div class="d-flex justify-content-center align-items-baseline gap-2">
+                                    <span class="text-muted" style="text-decoration:line-through;">{{ comparison.delay_comparison.before }}</span>
+                                    <i class="bi bi-arrow-right small"></i>
+                                    <strong class="fs-5 {% if comparison.delay_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %}">
+                                        {{ comparison.delay_comparison.after }}
+                                    </strong>
+                                </div>
+                                <div class="{% if comparison.delay_comparison.diff > 0 %}text-danger{% else %}text-success{% endif %} small">
+                                    {% if comparison.delay_comparison.diff > 0 %}+{% endif %}{{ comparison.delay_comparison.diff }} 个
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">暂无对比数据</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-exclamation-triangle"></i> 瓶颈变化分析</div>
+            <div class="card-body">
+                {% if bottleneck_diff %}
+                {% if bottleneck_diff.new_bottlenecks %}
+                <h6 class="text-danger"><i class="bi bi-plus-circle"></i> 新增瓶颈</h6>
+                <ul class="list-group list-group-flush mb-3">
+                    {% for bn in bottleneck_diff.new_bottlenecks %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span><strong>{{ bn.code }}</strong> {{ bn.name }}</span>
+                        <span class="badge bg-danger">评分 {{ bn.score }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if bottleneck_diff.worsened %}
+                <h6 class="text-warning"><i class="bi bi-arrow-up"></i> 恶化瓶颈</h6>
+                <ul class="list-group list-group-flush mb-3">
+                    {% for bn in bottleneck_diff.worsened %}
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between">
+                            <span><strong>{{ bn.code }}</strong> {{ bn.name }}</span>
+                            <span class="text-danger">+{{ bn.score_diff }} 分</span>
+                        </div>
+                        <small class="text-muted">等待: {{ bn.before_wait|floatformat:3 }} → {{ bn.after_wait|floatformat:3 }} 时辰</small>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if bottleneck_diff.improved %}
+                <h6 class="text-success"><i class="bi bi-arrow-down"></i> 缓解瓶颈</h6>
+                <ul class="list-group list-group-flush mb-3">
+                    {% for bn in bottleneck_diff.improved %}
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between">
+                            <span><strong>{{ bn.code }}</strong> {{ bn.name }}</span>
+                            <span class="text-success">{{ bn.score_diff }} 分</span>
+                        </div>
+                        <small class="text-muted">等待: {{ bn.before_wait|floatformat:3 }} → {{ bn.after_wait|floatformat:3 }} 时辰</small>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if bottleneck_diff.resolved_bottlenecks %}
+                <h6 class="text-success"><i class="bi bi-check-circle"></i> 已消除瓶颈</h6>
+                <ul class="list-group list-group-flush mb-3">
+                    {% for bn in bottleneck_diff.resolved_bottlenecks %}
+                    <li class="list-group-item d-flex justify-content-between">
+                        <span><strong>{{ bn.code }}</strong> {{ bn.name }}</span>
+                        <span class="badge bg-success">已消除</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if not bottleneck_diff.new_bottlenecks and not bottleneck_diff.worsened and not bottleneck_diff.improved and not bottleneck_diff.resolved_bottlenecks %}
+                <div class="text-center text-muted py-3">封锁前后瓶颈无明显变化</div>
+                {% endif %}
+                {% else %}
+                <div class="text-center text-muted py-4">暂无瓶颈数据</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-arrows-move"></i> 拥堵转移分析</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="congestionChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history"></i> 事件影响时间轴</span>
+            </div>
+            <div class="card-body">
+                {% if impact_timeline %}
+                {% for item in impact_timeline %}
+                <div class="timeline-event {% if item.severity >= 7 %}critical{% elif item.severity >= 4 %}warning{% else %}info{% endif %}">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h6 class="mb-1">
+                                <span class="badge {% if item.severity >= 7 %}bg-danger{% elif item.severity >= 4 %}bg-warning text-dark{% else %}bg-info{% endif %} me-1">
+                                    {{ item.event_type }}
+                                </span>
+                                {{ item.event_name }}
+                            </h6>
+                            <small class="text-muted">
+                                <i class="bi bi-clock"></i> {{ item.start_hour }} - {{ item.end_hour }} 时辰 |
+                                严重程度: {{ item.severity }}/10
+                            </small>
+                        </div>
+                        <span class="badge bg-secondary">{{ item.affected_snapshots|length }} 条快照</span>
+                    </div>
+                    {% if item.affected_snapshots %}
+                    <div class="mt-2" style="max-height: 120px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered mb-0" style="font-size: 0.75rem;">
+                            <thead><tr><th>时间</th><th>驿站</th><th>队列</th><th>利用率</th></tr></thead>
+                            <tbody>
+                                {% for snap in item.affected_snapshots|slice:":10" %}
+                                <tr>
+                                    <td>{{ snap.time|floatformat:1 }}</td>
+                                    <td>{{ snap.station_code }}</td>
+                                    <td>{{ snap.queue_length }}</td>
+                                    <td>{{ snap.utilization|floatformat:0 }}%</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% else %}
+                <div class="text-center text-muted py-4">暂无影响时间轴数据</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-lightbulb"></i> 恢复策略建议</span>
+                <small class="text-white-50">按优先级排列</small>
+            </div>
+            <div class="card-body">
+                {% if recovery_strategies %}
+                <div class="row g-3">
+                    {% for strategy in recovery_strategies %}
+                    <div class="col-md-6">
+                        <div class="card strategy-card {{ strategy.priority }}">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <span class="badge {% if strategy.priority == 'critical' %}bg-danger{% elif strategy.priority == 'high' %}bg-warning text-dark{% elif strategy.priority == 'medium' %}bg-info{% else %}bg-success{% endif %}">
+                                            {% if strategy.priority == 'critical' %}紧急{% elif strategy.priority == 'high' %}高{% elif strategy.priority == 'medium' %}中{% else %}低{% endif %}
+                                        </span>
+                                        <strong class="ms-2">{{ strategy.strategy }}</strong>
+                                    </div>
+                                    <small class="text-muted">{{ strategy.event }}</small>
+                                </div>
+                                <p class="small mb-2">{{ strategy.description }}</p>
+                                {% if strategy.actions %}
+                                <div class="small">
+                                    <strong>建议措施：</strong>
+                                    <ul class="mb-0 ps-3">
+                                        {% for action in strategy.actions %}
+                                        <li>{{ action }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">暂无恢复策略建议</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if drill.status == 'completed' %}
+<script>
+const DRILL_DATA = {{ drill_data_json|safe }};
+
+const PRIORITY_COLORS = {
+    critical: '#C62828',
+    high: '#E65100',
+    medium: '#F57F17',
+    low: '#2E7D32'
+};
+
+function renderComparisonChart() {
+    const ctx = document.getElementById('comparisonChart').getContext('2d');
+    const comp = DRILL_DATA.comparison;
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['平均等待', '最大等待', '平均送达', '延误数'],
+            datasets: [{
+                label: '封锁前',
+                data: [comp.wait_comparison.before, comp.max_wait_comparison.before, comp.total_comparison.before, comp.delay_comparison.before],
+                backgroundColor: 'rgba(46, 125, 50, 0.6)',
+                borderColor: '#2E7D32',
+                borderWidth: 1
+            }, {
+                label: '封锁后',
+                data: [comp.wait_comparison.after, comp.max_wait_comparison.after, comp.total_comparison.after, comp.delay_comparison.after],
+                backgroundColor: 'rgba(198, 40, 40, 0.6)',
+                borderColor: '#C62828',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: function(context) {
+                            const idx = context.dataIndex;
+                            const diffs = [comp.wait_comparison.diff, comp.max_wait_comparison.diff, comp.total_comparison.diff, comp.delay_comparison.diff];
+                            return `变化: ${diffs[idx] > 0 ? '+' : ''}${diffs[idx]}`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: '数值' } }
+            }
+        }
+    });
+}
+
+function renderCongestionChart() {
+    const ctx = document.getElementById('congestionChart').getContext('2d');
+    const transfer = DRILL_DATA.congestion_transfer;
+    const codes = Object.keys(transfer).sort((a, b) => transfer[b].score_diff - transfer[a].score_diff).slice(0, 10);
+
+    if (codes.length === 0) {
+        ctx.font = '16px sans-serif';
+        ctx.fillStyle = '#999';
+        ctx.textAlign = 'center';
+        ctx.fillText('暂无拥堵转移数据', ctx.canvas.width / 2, ctx.canvas.height / 2);
+        return;
+    }
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: codes,
+            datasets: [{
+                label: '封锁前等待',
+                data: codes.map(c => transfer[c].base_avg_wait),
+                backgroundColor: 'rgba(46, 125, 50, 0.5)',
+                borderColor: '#2E7D32',
+                borderWidth: 1
+            }, {
+                label: '封锁后等待',
+                data: codes.map(c => transfer[c].drill_avg_wait),
+                backgroundColor: 'rgba(198, 40, 40, 0.5)',
+                borderColor: '#C62828',
+                borderWidth: 1
+            }, {
+                label: '变化量',
+                type: 'line',
+                data: codes.map(c => transfer[c].wait_diff),
+                borderColor: '#F57C00',
+                backgroundColor: 'transparent',
+                tension: 0.3,
+                pointRadius: 4,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'top' } },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: '平均等待(时辰)' } },
+                x: { title: { display: true, text: '驿站' } }
+            }
+        }
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderComparisonChart();
+    renderCongestionChart();
+});
+</script>
+{% endif %}
+{% endblock %}

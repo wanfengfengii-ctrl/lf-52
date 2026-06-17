@@ -4,6 +4,7 @@ from .models import (
     DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment,
     StationPeakHour, SimulationRun, SimTask, SimStationVisit,
     SimStationSnapshot, SimBottleneckStation,
+    RoadBlockadeEvent, BlockadeDrill,
 )
 
 
@@ -92,3 +93,17 @@ class DeliveryPlanAdmin(admin.ModelAdmin):
 class PlanSegmentAdmin(admin.ModelAdmin):
     list_display = ['plan', 'order', 'road', 'segment_time', 'is_high_risk', 'departure_time', 'arrival_time']
     list_filter = ['is_high_risk']
+
+
+@admin.register(RoadBlockadeEvent)
+class RoadBlockadeEventAdmin(admin.ModelAdmin):
+    list_display = ['name', 'event_type', 'road', 'station', 'start_hour', 'end_hour', 'severity', 'flow_rate']
+    list_filter = ['event_type']
+    search_fields = ['name']
+
+
+@admin.register(BlockadeDrill)
+class BlockadeDrillAdmin(admin.ModelAdmin):
+    list_display = ['name', 'base_simulation', 'status', 'affected_task_count', 'reroute_cost_total', 'created_at']
+    list_filter = ['status']
+    search_fields = ['name']
