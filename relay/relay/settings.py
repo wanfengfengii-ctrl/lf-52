@@ -69,3 +69,8 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+import os
+FORCE_SCRIPT_NAME = os.environ.get('FORCE_SCRIPT_NAME', '') or None
+if FORCE_SCRIPT_NAME:
+    STATIC_URL = FORCE_SCRIPT_NAME + '/' + STATIC_URL.lstrip('/')

@@ -40,6 +40,23 @@
     .leaflet-marker-icon.create-mode-hover {
         filter: drop-shadow(0 0 6px #0d6efd);
     }
+    .plan-tab {
+        cursor: pointer;
+        padding: 6px 14px;
+        border-radius: 4px 4px 0 0;
+        border: 1px solid #ddd;
+        border-bottom: none;
+        background: #f8f9fa;
+        margin-right: 4px;
+        font-size: 13px;
+        display: inline-block;
+    }
+    .plan-tab.active {
+        background: white;
+        border-color: #8B4513;
+        color: #8B4513;
+        font-weight: bold;
+    }
 </style>
 {% endblock %}
 
@@ -69,11 +86,11 @@
             <div class="card-header"><i class="bi bi-calculator"></i> 路线快速计算</div>
             <div class="card-body">
                 <div class="row g-3 align-items-end">
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label">起点驿站</label>
                         <select id="calc-origin" class="form-select"></select>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label">终点驿站</label>
                         <select id="calc-dest" class="form-select"></select>
                     </div>
@@ -90,6 +107,10 @@
                         <select id="calc-strategy" class="form-select">
                             <option value="">不换马</option>
                         </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">要求时限(时辰)</label>
+                        <input type="number" id="calc-deadline" class="form-control" min="0" step="0.5" placeholder="可选">
                     </div>
                     <div class="col-md-2">
                         <button id="calc-btn" class="btn btn-primary w-100"><i class="bi bi-calculator"></i> 计算</button>
@@ -147,6 +168,11 @@
     var stations = {{ stations_json|safe }};
     var roads = {{ roads_json|safe }};
     var weatherMap = {{ weather_json|safe }};
+    var apiStationsUrl = "{% url 'courier:api_stations' %}";
+    var apiRoadsUrl = "{% url 'courier:api_roads' %}";
+    var apiRoadsCreateUrl = "{% url 'courier:api_create_road' %}";
+    var apiStrategiesUrl = "{% url 'courier:api_strategies' %}";
+    var apiCalculateUrl = "{% url 'courier:api_calculate_route' %}";
 
     var map = L.map('map').setView([34.5, 108], 5);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -164,7 +190,7 @@
     stations.forEach(function(s) {
         var marker = L.marker([s.lat, s.lng]).addTo(map);
         marker.stationId = s.id;
-        marker.bindPopup('<strong>' + s.code + '</strong> - ' + s.name);
+        marker.bindPopup('<strong>' + s.code + '</strong> - ' + s.name + '<br><small>处理能力: ' + s.capacity + ' / 中转耗时: ' + s.process_time + '时辰</small>');
         marker.bindTooltip(s.code + ' ' + s.name, {permanent: false});
         stationMarkers[s.id] = marker;
         bounds.push([s.lat, s.lng]);
@@ -237,7 +263,7 @@
         destSel.appendChild(opt2);
     });
 
-    fetch('/api/strategies/').then(r => r.json()).then(data => {
+    fetch(apiStrategiesUrl).then(r => r.json()).then(data => {
         var sel = document.getElementById('calc-strategy');
         data.forEach(function(s) {
             var opt = document.createElement('option');
@@ -246,47 +272,94 @@
         });
     }).catch(() => {});
 
+    var currentCalcData = null;
+    var currentPlanIndex = 0;
+
     document.getElementById('calc-btn').addEventListener('click', function() {
         var origin = originSel.value;
         var dest = destSel.value;
         var priority = document.getElementById('calc-priority').value;
         var strategy = document.getElementById('calc-strategy').value;
+        var deadline = document.getElementById('calc-deadline').value;
         var resultDiv = document.getElementById('calc-result');
 
         if (!origin || !dest) { alert('请选择起点和终点'); return; }
         if (origin === dest) { alert('起点和终点不能相同'); return; }
 
-        var url = '/api/calculate/?origin=' + origin + '&destination=' + dest + '&priority=' + priority;
+        var url = apiCalculateUrl + '?origin=' + origin + '&destination=' + dest + '&priority=' + priority;
         if (strategy) url += '&strategy=' + strategy;
+        if (deadline) url += '&deadline=' + deadline;
 
         fetch(url).then(r => r.json()).then(data => {
             if (data.error) {
                 resultDiv.innerHTML = '<div class="alert alert-danger">' + data.error + '</div>';
             } else {
-                var riskBadge = data.has_high_risk ?
-                    '<span class="badge badge-risk">存在高风险</span>' :
-                    '<span class="badge badge-safe">无高风险</span>';
-                var html = '<div class="alert alert-success">' +
-                    '<h5>预计送达时间: <strong>' + data.total_time + ' 时辰</strong> ' + riskBadge + '</h5>' +
-                    '</div><table class="table table-sm table-hover"><thead><tr>' +
-                    '<th>顺序</th><th>路段</th><th>距离(里)</th><th>行进(时辰)</th>' +
-                    '<th>换马(时辰)</th><th>合计(时辰)</th><th>风险</th></tr></thead><tbody>';
-                data.segments.forEach(function(seg) {
-                    var rowClass = seg.is_high_risk ? ' class="risk-row"' : '';
-                    var riskBadge2 = seg.is_high_risk ?
-                        '<span class="badge badge-risk">高风险</span>' :
-                        '<span class="badge badge-safe">正常</span>';
-                    html += '<tr' + rowClass + '><td>' + seg.order + '</td><td>' + seg.from + '→' + seg.to +
-                        '</td><td>' + seg.distance + '</td><td>' + seg.travel_time +
-                        '</td><td>' + seg.horse_change_time + '</td><td>' + seg.time +
-                        '</td><td>' + riskBadge2 + '</td></tr>';
-                });
-                html += '</tbody></table>';
-                resultDiv.innerHTML = html;
+                currentCalcData = data;
+                currentPlanIndex = 0;
+                renderCalcResult();
             }
             resultDiv.style.display = 'block';
         });
     });
+
+    function renderCalcResult() {
+        var data = currentCalcData;
+        if (!data) return;
+        var plans = data.all_plans || [];
+        if (plans.length === 0) return;
+
+        var plan = plans[currentPlanIndex];
+
+        var tabsHtml = '<div class="mb-2">';
+        plans.forEach(function(p, i) {
+            var active = i === currentPlanIndex ? ' active' : '';
+            var badge = p.is_delay_risk ? ' <span class="badge bg-warning text-dark">延误风险</span>' : '';
+            tabsHtml += '<span class="plan-tab' + active + '" onclick="switchPlan(' + i + ')">' + p.plan_type_display + badge + '</span>';
+        });
+        tabsHtml += '</div>';
+
+        var riskBadge = data.has_high_risk ?
+            '<span class="badge badge-risk ms-2">存在高风险</span>' :
+            '<span class="badge badge-safe ms-2">无高风险</span>';
+        var delayBadge = plan.is_delay_risk ?
+            '<span class="badge bg-warning text-dark ms-2">延误概率 ' + (plan.delay_probability*100).toFixed(0) + '%</span>' :
+            '';
+
+        var summaryHtml = '<div class="alert alert-' + (plan.is_delay_risk ? 'warning' : 'success') + '">' +
+            '<h5>' +
+            '总耗时: <strong>' + plan.total_time + ' 时辰</strong>' +
+            ' | 总距离: <strong>' + plan.total_distance + ' 里</strong>' +
+            ' | 途经: <strong>' + plan.station_count + ' 站</strong>' +
+            riskBadge + delayBadge +
+            '</h5></div>';
+
+        var html = tabsHtml + summaryHtml +
+            '<table class="table table-sm table-hover"><thead><tr>' +
+            '<th>顺序</th><th>路段</th><th>距离(里)</th><th>等级</th><th>行进(时辰)</th>' +
+            '<th>换马(时辰)</th><th>中转(时辰)</th><th>合计(时辰)</th><th>风险</th></tr></thead><tbody>';
+
+        plan.segments.forEach(function(seg) {
+            var rowClass = seg.is_high_risk ? ' class="risk-row"' : '';
+            var riskBadge2 = seg.is_high_risk ?
+                '<span class="badge badge-risk">高风险</span>' :
+                '<span class="badge badge-safe">正常</span>';
+            var gradeText = {1:'官道',2:'驿道',3:'乡道',4:'山路',5:'险道'}[seg.grade] || '-';
+            html += '<tr' + rowClass + '><td>' + seg.order + '</td><td>' + seg.from + '→' + seg.to +
+                '</td><td>' + seg.distance + '</td><td>' + gradeText +
+                '</td><td>' + seg.travel_time +
+                '</td><td>' + seg.horse_change_time +
+                '</td><td>' + (seg.process_time || 0) + '</td><td><strong>' + seg.time +
+                '</strong></td><td>' + riskBadge2 + '</td></tr>';
+        });
+        html += '</tbody></table>';
+
+        document.getElementById('calc-result').innerHTML = html;
+    }
+
+    function switchPlan(index) {
+        currentPlanIndex = index;
+        renderCalcResult();
+    }
 
     var createRoadMode = false;
     var fromStation = null;
@@ -342,7 +415,7 @@
             var toS = getStationById(stationId);
 
             var exists = roads.some(function(r) {
-                return (r.from.code == fromS.code && r.to.code == toS.code);
+                return (r.from_id == fromS.id && r.to_id == toS.id) || (r.from_id == toS.id && r.to_id == fromS.id);
             });
             if (exists) {
                 alert('该道路已存在');
@@ -381,7 +454,7 @@
             return;
         }
 
-        fetch('/api/roads/create/', {
+        fetch(apiRoadsCreateUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
             body: JSON.stringify({
@@ -400,6 +473,8 @@
             } else {
                 var newRoad = {
                     id: data.id,
+                    from_id: fromId,
+                    to_id: toId,
                     from: { code: data.from.code, lat: getStationById(fromId).lat, lng: getStationById(fromId).lng },
                     to: { code: data.to.code, lat: getStationById(toId).lat, lng: getStationById(toId).lng },
                     distance: data.distance,

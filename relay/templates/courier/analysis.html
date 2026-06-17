@@ -135,6 +135,8 @@
 
 {% block extra_js %}
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+
     {% for item in task_data %}
     (function() {
         var ctx = document.getElementById('chart-task-{{ item.task.pk }}');
@@ -175,6 +177,7 @@
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     x: { stacked: true },
                     y: { stacked: true, title: { display: true, text: '时辰' } }
@@ -184,38 +187,57 @@
                 }
             }
         });
+    })();
 
+    (function() {
         var planCtx = document.getElementById('chart-plan-{{ item.task.pk }}');
-        if (planCtx) {
-            var planData = {{ item.plan_comparison|safe }};
-            if (planData && planData.length > 0) {
-                var labels = planData.map(function(p) { return p.plan_type_display; });
-                var times = planData.map(function(p) { return p.total_time; });
-                var delays = planData.map(function(p) { return (p.delay_probability * 100); });
-                var risks = planData.map(function(p) { return p.risk_count; });
-                var colors = planData.map(function(p, i) {
-                    if (p.plan_type === 'fastest') return 'rgba(13,110,253,0.7)';
-                    if (p.plan_type === 'safest') return 'rgba(40,167,69,0.7)';
-                    if (p.plan_type === 'balanced') return 'rgba(255,193,7,0.7)';
-                    return 'rgba(111,66,193,0.7)';
-                });
-                new Chart(planCtx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [
-                            { label: '总耗时（时辰）', data: times, backgroundColor: colors },
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        indexAxis: 'y',
-                        scales: { x: { title: { display: true, text: '时辰' } },
-                        plugins: { legend: { display: false } }
+        if (!planCtx) return;
+        var planData = {{ item.plan_comparison|safe }};
+        if (!planData || planData.length === 0) return;
+
+        var labels = planData.map(function(p) { return p.plan_type_display; });
+        var times = planData.map(function(p) { return p.total_time; });
+        var colors = planData.map(function(p) {
+            if (p.plan_type === 'fastest') return 'rgba(13,110,253,0.7)';
+            if (p.plan_type === 'safest') return 'rgba(40,167,69,0.7)';
+            if (p.plan_type === 'balanced') return 'rgba(255,193,7,0.7)';
+            return 'rgba(111,66,193,0.7)';
+        });
+
+        new Chart(planCtx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    { label: '总耗时（时辰）', data: times, backgroundColor: colors }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                indexAxis: 'y',
+                scales: {
+                    x: { title: { display: true, text: '时辰' } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var idx = ctx.dataIndex;
+                                var p = planData[idx];
+                                return [
+                                    '总耗时: ' + p.total_time + ' 时辰',
+                                    '总距离: ' + p.total_distance + ' 里',
+                                    '高风险段: ' + p.risk_count + ' 段',
+                                    '延误概率: ' + (p.delay_probability * 100).toFixed(0) + '%'
+                                ];
+                            }
+                        }
                     }
-                });
+                }
             }
-        }
+        });
     })();
     {% endfor %}
 
@@ -243,9 +265,10 @@
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 indexAxis: 'y',
                 scales: {
-                    x: { title: { display: true, text: '时辰' }
+                    x: { title: { display: true, text: '时辰' } }
                 },
                 plugins: {
                     legend: { display: false }
@@ -258,49 +281,55 @@
     {% if delay_count > 0 %}
     (function() {
         var ctx = document.getElementById('delayWarningChart');
-        if (ctx) {
-            var data = {{ delay_data|safe }};
-            if (data && data.length > 0) {
-                var labels = data.map(function(d) { return d.task_code; });
-                var estimated = data.map(function(d) { return d.estimated; });
-                var deadlines = data.map(function(d) { return d.deadline; });
-                var fastest = data.map(function(d) { return d.fastest; });
+        if (!ctx) return;
+        var data = {{ delay_data|safe }};
+        if (!data || data.length === 0) return;
 
-                new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels,
-                        datasets: [
-                            {
-                                label: '当前预计（时辰）',
-                                data: estimated,
-                                backgroundColor: 'rgba(220,53,69,0.7)'
-                            },
-                            {
-                                label: '最快方案（时辰）',
-                                data: fastest,
-                                backgroundColor: 'rgba(255,193,7,0.7)'
-                            },
-                            {
-                                label: '要求时限（时辰）',
-                                data: deadlines,
-                                type: 'line',
-                                borderColor: 'rgba(13,110,253,1)',
-                                backgroundColor: 'rgba(13,110,253,0.2)',
-                                borderDash: [5, 5],
-                                tension: 0
-                            }
-                        ]
+        var labels = data.map(function(d) { return d.task_code + ' (' + d.route + ')'; });
+        var estimated = data.map(function(d) { return d.estimated; });
+        var deadlines = data.map(function(d) { return d.deadline; });
+        var fastest = data.map(function(d) { return d.fastest; });
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: '当前预计（时辰）',
+                        data: estimated,
+                        backgroundColor: 'rgba(220,53,69,0.7)'
                     },
-                    options: {
-                        responsive: true,
-                        scales: { y: { title: { display: true, text: '时辰' } },
-                        plugins: { legend: { position: 'top' } }
+                    {
+                        label: '最快方案（时辰）',
+                        data: fastest,
+                        backgroundColor: 'rgba(255,193,7,0.7)'
+                    },
+                    {
+                        label: '要求时限（时辰）',
+                        data: deadlines,
+                        type: 'line',
+                        borderColor: 'rgba(13,110,253,1)',
+                        backgroundColor: 'rgba(13,110,253,0.2)',
+                        borderDash: [5, 5],
+                        tension: 0
                     }
-                });
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { title: { display: true, text: '时辰' } }
+                },
+                plugins: {
+                    legend: { position: 'top' }
+                }
             }
-        }
+        });
     })();
     {% endif %}
+
+});
 </script>
 {% endblock %}
