@@ -15,14 +15,17 @@ from .forms import (
     DeliverySegmentForm, SimulationRunForm, StationPeakHourForm,
     RoadBlockadeEventForm, BlockadeDrillForm,
 )
-from .engine import (
+from .services import (
     calculate_delivery_time, recalculate_affected_tasks,
-    get_analysis_data, find_path, calculate_segment_time,
-    generate_all_plans, get_plan_comparison_data, get_gantt_data,
-    find_all_paths,
+    generate_all_plans_for_task, get_task_analysis_data,
+    get_plan_comparison_for_task, get_gantt_for_task,
+    calculate_route_api,
+    get_strategy_comparison, get_delay_warning_data,
+    get_analysis_dashboard_data,
+    run_simulation, get_simulation_result_data,
+    run_blockade_drill, get_blockade_drill_data,
 )
-from .simulation_engine import run_simulation, get_simulation_result_data
-from .blockade_engine import run_blockade_drill, get_blockade_drill_data
+from .engine import find_path, calculate_segment_time
 
 
 def index(request):
@@ -275,9 +278,9 @@ def task_detail(request, pk):
         if request.method == 'GET':
             segment_forms.append(DeliverySegmentForm(instance=seg, prefix=f'seg_{seg.pk}'))
 
-    chart_data = get_analysis_data(task)
-    plan_comparison = get_plan_comparison_data(task)
-    gantt_data = get_gantt_data(task)
+    chart_data = get_task_analysis_data(task)
+    plan_comparison = get_plan_comparison_for_task(task)
+    gantt_data = get_gantt_for_task(task)
 
     if request.method == 'POST':
         action = request.POST.get('action')
@@ -401,54 +404,22 @@ def map_view(request):
 
 
 def analysis_dashboard(request):
-    tasks = DeliveryTask.objects.select_related('origin', 'destination', 'strategy').all()
+    dashboard_data = get_analysis_dashboard_data()
+
     task_data = []
-    for task in tasks:
-        if task.estimated_hours:
-            chart = get_analysis_data(task)
-            plan_comparison = get_plan_comparison_data(task)
-            task_data.append({
-                'task': task,
-                'chart_data': json.dumps(chart, ensure_ascii=False),
-                'plan_comparison': json.dumps(plan_comparison, ensure_ascii=False),
-            })
-
-    all_strategies = HorseChangeStrategy.objects.all()
-    comparison_data = []
-    if all_strategies.count() >= 2 and tasks.exists():
-        sample_task = tasks.first()
-        if sample_task:
-            for strategy in all_strategies:
-                segments = DeliverySegment.objects.filter(task=sample_task).select_related('road').all()
-                total = 0
-                for seg in segments:
-                    result = calculate_segment_time(seg.road, priority=sample_task.priority, strategy=strategy)
-                    total += result['total_time']
-                comparison_data.append({
-                    'name': strategy.name,
-                    'time': round(total, 2),
-                })
-
-    delay_warning_tasks = DeliveryTask.objects.filter(delay_warning=True).select_related('origin', 'destination')
-    delay_data = []
-    for t in delay_warning_tasks:
-        plans = t.plans.all()
-        min_time = min((p.total_time for p in plans), default=t.estimated_hours or 0)
-        delay_data.append({
-            'task_code': t.task_code,
-            'route': f'{t.origin.code}→{t.destination.code}',
-            'estimated': t.estimated_hours,
-            'deadline': t.deadline_hours,
-            'fastest': min_time,
-            'plans_count': plans.count(),
+    for item in dashboard_data['task_data']:
+        task_data.append({
+            'task': item['task'],
+            'chart_data': json.dumps(item['chart_data'], ensure_ascii=False),
+            'plan_comparison': json.dumps(item['plan_comparison'], ensure_ascii=False),
         })
 
     context = {
         'task_data': task_data,
-        'comparison_data': json.dumps(comparison_data, ensure_ascii=False),
-        'comparison_available': len(comparison_data) >= 2,
-        'delay_data': json.dumps(delay_data, ensure_ascii=False),
-        'delay_count': len(delay_data),
+        'comparison_data': json.dumps(dashboard_data['comparison_data'], ensure_ascii=False),
+        'comparison_available': dashboard_data['comparison_available'],
+        'delay_data': json.dumps(dashboard_data['delay_data'], ensure_ascii=False),
+        'delay_count': dashboard_data['delay_count'],
     }
     return render(request, 'courier/analysis.html', context)
 
@@ -556,80 +527,47 @@ def api_calculate_route(request):
     if not origin_id or not dest_id:
         return JsonResponse({'error': '需要指定起点和终点'}, status=400)
 
-    all_results = find_all_paths(int(origin_id), int(dest_id), priority=priority)
-    if not all_results:
-        return JsonResponse({'error': '没有连通路线'}, status=404)
+    deadline_float = None
+    if deadline:
+        try:
+            deadline_float = float(deadline)
+        except (ValueError, TypeError):
+            pass
 
-    strategy = None
+    strategy_id_int = None
     if strategy_id:
-        strategy = HorseChangeStrategy.objects.filter(pk=int(strategy_id)).first()
+        try:
+            strategy_id_int = int(strategy_id)
+        except (ValueError, TypeError):
+            pass
 
-    plans_output = []
-    for ptype, path_roads, path_results_data in all_results:
-        total_time = 0.0
-        total_distance = 0.0
-        risk_count = 0
-        segments = []
-        for idx, (road, seg_result) in enumerate(zip(path_roads, path_results_data)):
-            seg_time = calculate_segment_time(road, priority=priority, strategy=strategy)
-            total_time += seg_time['total_time']
-            total_distance += seg_time['distance']
-            if seg_time['is_high_risk']:
-                risk_count += 1
-            segments.append({
-                'order': idx + 1,
-                'from': road.from_station.code,
-                'to': road.to_station.code,
-                'distance': seg_time['distance'],
-                'time': seg_time['total_time'],
-                'travel_time': seg_time['travel_time'],
-                'horse_change_time': seg_time['horse_change_time'],
-                'process_time': seg_time['process_time'],
-                'is_high_risk': seg_time['is_high_risk'],
-                'grade': road.grade,
-                'slope': road.slope,
-            })
+    result = calculate_route_api(
+        origin_id=int(origin_id),
+        destination_id=int(dest_id),
+        strategy_id=strategy_id_int,
+        priority=priority,
+        deadline=deadline_float,
+        plan_type=plan_type,
+    )
 
-        delay_prob = 0.0
-        is_delay_risk = False
-        if deadline:
-            try:
-                dh = float(deadline)
-                ratio = total_time / dh
-                base_prob = max(0.0, (ratio - 0.7) / 0.5)
-                risk_factor = min(1.0, risk_count * 0.15 + len(path_roads) * 0.02)
-                delay_prob = min(1.0, base_prob * 0.6 + risk_factor * 0.4)
-                is_delay_risk = delay_prob >= 0.3
-            except (ValueError, TypeError):
-                pass
+    if result.is_failure:
+        status_code = 404 if result.error_code == 'ROUTE_NOT_FOUND' else 400
+        return JsonResponse({'error': result.error}, status=status_code)
 
-        plans_output.append({
-            'plan_type': ptype,
-            'plan_type_display': dict(DeliveryPlan.PLAN_TYPE_CHOICES).get(ptype, ptype),
-            'total_time': round(total_time, 2),
-            'total_distance': round(total_distance, 2),
-            'risk_count': risk_count,
-            'station_count': len(path_roads),
-            'is_delay_risk': is_delay_risk,
-            'delay_probability': round(delay_prob, 2),
-            'segments': segments,
-        })
-
-    selected = next((p for p in plans_output if p['plan_type'] == plan_type), plans_output[0] if plans_output else None)
-
+    data = result.data
     return JsonResponse({
-        'selected_plan': selected,
-        'all_plans': plans_output,
-        'has_high_risk': any(p['risk_count'] > 0 for p in plans_output),
-        'has_delay_risk': any(p['is_delay_risk'] for p in plans_output),
+        'selected_plan': data['selected_plan'],
+        'all_plans': data['all_plans'],
+        'has_high_risk': data['has_high_risk'],
+        'has_delay_risk': data['has_delay_risk'],
     })
 
 
 def api_task_plans(request, pk):
     task = get_object_or_404(DeliveryTask, pk=pk)
-    plans = generate_all_plans(task)
-    comparison = get_plan_comparison_data(task)
-    gantt = get_gantt_data(task)
+    plans = generate_all_plans_for_task(task)
+    comparison = get_plan_comparison_for_task(task)
+    gantt = get_gantt_for_task(task)
     return JsonResponse({
         'task_code': task.task_code,
         'selected_plan_type': task.selected_plan_type,
