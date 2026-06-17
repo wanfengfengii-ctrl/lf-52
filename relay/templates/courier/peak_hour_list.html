@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+
+{% block title %}高峰时段配置 - 驿站文书递送模拟系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-sunrise"></i> 驿站高峰时段配置</h2>
+    <a href="{% url 'courier:peak_hour_create' %}" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> 新建高峰时段
+    </a>
+</div>
+
+<div class="alert alert-info mb-4">
+    <i class="bi bi-info-circle"></i>
+    <strong>说明：</strong>高峰时段会影响驿站的处理能力（窗口数减少）和处理时延（处理时间增加），是造成排队拥堵的重要因素。
+    建议为核心枢纽驿站配置早朝(辰时, 7-9时)和傍晚(酉时, 17-19时)两个高峰时段。
+</div>
+
+<div class="card">
+    <div class="card-header">高峰时段列表</div>
+    <div class="card-body p-0">
+        {% if peak_hours %}
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>驿站</th>
+                        <th>时段(时辰)</th>
+                        <th>标签</th>
+                        <th>处理能力倍率</th>
+                        <th>到达率倍率</th>
+                        <th>处理时延增幅</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ph in peak_hours %}
+                    <tr>
+                        <td>#{{ ph.pk }}</td>
+                        <td>
+                            <strong>{{ ph.station.code }}</strong>
+                            <small class="text-muted">{{ ph.station.name }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-warning text-dark">
+                                {{ ph.start_hour }}:00 - {{ ph.end_hour }}:00
+                            </span>
+                        </td>
+                        <td>{{ ph.label|default:"-" }}</td>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="progress" style="width:80px; height:8px;">
+                                    <div class="progress-bar bg-warning" style="width:{% widthratio ph.capacity_multiplier 1 100 %}%"></div>
+                                </div>
+                                <small>{{ ph.capacity_multiplier }}x</small>
+                            </div>
+                        </td>
+                        <td>
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="progress" style="width:80px; height:8px;">
+                                    <div class="progress-bar bg-info" style="width:{% widthratio ph.arrival_multiplier 3 100 %}%"></div>
+                                </div>
+                                <small>{{ ph.arrival_multiplier }}x</small>
+                            </div>
+                        </td>
+                        <td><span class="badge bg-danger">{{ ph.process_delay_pct }}%</span></td>
+                        <td>
+                            <a href="{% url 'courier:peak_hour_update' ph.pk %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                            <form method="post" action="{% url 'courier:peak_hour_delete' ph.pk %}" class="d-inline" onsubmit="return confirm('确定删除？');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-sunrise" style="font-size: 3rem;"></i>
+            <p class="mt-3">暂无高峰时段配置</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

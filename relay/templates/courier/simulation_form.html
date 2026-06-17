@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} - 驿站文书递送模拟系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-diagram-3"></i> {{ title }}</h2>
+    <a href="{% url 'courier:simulation_list' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">基本参数</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="row mb-3">
+                        <div class="col-md-8">
+                            <label class="form-label">{{ form.name.label }}</label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                            <div class="text-danger small">{{ form.name.errors }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.random_seed.label }}</label>
+                            {{ form.random_seed }}
+                            <div class="form-text">相同种子可复现仿真结果</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">{{ form.description.label }}</label>
+                        {{ form.description }}
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.sim_start_time.label }}</label>
+                            {{ form.sim_start_time }}
+                            <div class="form-text">时辰，如 0 = 子时</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.sim_end_time.label }}</label>
+                            {{ form.sim_end_time }}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.task_count.label }}</label>
+                            {{ form.task_count }}
+                            <div class="form-text">建议 20-200 个</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            {{ form.enable_peak_hours }}
+                            <label class="form-check-label">{{ form.enable_peak_hours.label }}</label>
+                        </div>
+                        <div class="form-text">启用后将模拟早高峰(8时左右)和晚高峰(17时左右)的拥堵</div>
+                    </div>
+
+                    <hr>
+                    <h5 class="mb-3">优先级分布</h5>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.priority_1_pct.label }}</label>
+                            <div class="input-group">
+                                {{ form.priority_1_pct }}
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.priority_2_pct.label }}</label>
+                            <div class="input-group">
+                                {{ form.priority_2_pct }}
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.priority_3_pct.label }}</label>
+                            <div class="input-group">
+                                {{ form.priority_3_pct }}
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-text mb-3">三者比例将自动归一化</div>
+
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger">
+                        {{ form.non_field_errors }}
+                    </div>
+                    {% endif %}
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存配置
+                        </button>
+                        <a href="{% url 'courier:simulation_list' %}" class="btn btn-outline-secondary">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> 配置说明
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled small">
+                    <li class="mb-2"><strong><i class="bi bi-clock-history"></i> 时间范围：</strong>仿真的时间跨度，建议设置为 0-24 时辰（一整天）</li>
+                    <li class="mb-2"><strong><i class="bi bi-people"></i> 任务数量：</strong>同时仿真的递送任务总数，越多精度越高但耗时更长</li>
+                    <li class="mb-2"><strong><i class="bi bi-sunrise"></i> 高峰时段：</strong>模拟早朝（辰时）和傍晚（酉时）的繁忙期，处理效率降低、到达率提高</li>
+                    <li class="mb-2"><strong><i class="bi bi-shield-check"></i> 优先级：</strong>
+                        <ul>
+                            <li>普通：标准处理时长</li>
+                            <li>加急：处理速度 x1.25</li>
+                            <li>八百里加急：处理速度 x1.67，插队优先级最高</li>
+                        </ul>
+                    </li>
+                    <li class="mb-2"><strong><i class="bi bi-dice-5"></i> 随机种子：</strong>相同种子结果完全相同，便于对比实验</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

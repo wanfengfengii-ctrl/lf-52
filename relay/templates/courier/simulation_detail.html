@@ -1,0 +1,522 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ sim.name }} - 仿真详情{% endblock %}
+
+{% block extra_head %}
+<style>
+    .heatmap-cell {
+        transition: all 0.2s;
+        cursor: pointer;
+    }
+    .heatmap-cell:hover {
+        transform: scale(1.05);
+        z-index: 10;
+        position: relative;
+    }
+    .bottleneck-card {
+        border-left: 4px solid var(--relay-danger);
+    }
+    .bottleneck-card.rank-1 { border-left-width: 6px; background: linear-gradient(90deg, rgba(198,40,40,0.1) 0%, transparent 50%); }
+    .bottleneck-card.rank-2 { border-left-color: #E65100; background: linear-gradient(90deg, rgba(230,81,0,0.08) 0%, transparent 50%); }
+    .bottleneck-card.rank-3 { border-left-color: #F57F17; background: linear-gradient(90deg, rgba(245,127,23,0.08) 0%, transparent 50%); }
+    .chart-container { position: relative; height: 320px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-diagram-3"></i> {{ sim.name }}</h2>
+    <div>
+        <a href="{% url 'courier:simulation_list' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> 返回列表
+        </a>
+        {% if sim.status != 'running' %}
+        <form method="post" action="{% url 'courier:simulation_run' sim.pk %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-play-circle"></i>
+                {% if sim.status == 'completed' %}重新运行{% else %}开始仿真{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-label mb-1">状态</div>
+            <div>
+                {% if sim.status == 'pending' %}
+                <span class="badge bg-secondary fs-6">待运行</span>
+                {% elif sim.status == 'running' %}
+                <span class="badge bg-primary fs-6">运行中</span>
+                {% elif sim.status == 'completed' %}
+                <span class="badge bg-success fs-6">已完成</span>
+                {% elif sim.status == 'failed' %}
+                <span class="badge bg-danger fs-6">失败</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-number" style="font-size: 2rem;">{{ sim.total_tasks_simulated|default:0 }}</div>
+            <div class="stat-label">完成任务数</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-secondary);">{{ sim.avg_wait_time|default:"-" }}</div>
+            <div class="stat-label">平均等待(时辰)</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-danger);">{{ sim.max_wait_time|default:"-" }}</div>
+            <div class="stat-label">最大等待(时辰)</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-primary);">{{ sim.avg_total_time|default:"-" }}</div>
+            <div class="stat-label">平均送达(时辰)</div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="stat-number" style="font-size: 2rem; color: var(--relay-danger);">{{ sim.total_delay_count|default:0 }}</div>
+            <div class="stat-label">延误任务数</div>
+        </div>
+    </div>
+</div>
+
+{% if sim.status == 'failed' %}
+<div class="alert alert-danger mb-4">
+    <i class="bi bi-exclamation-triangle"></i> <strong>仿真运行失败：</strong>{{ sim.error_message }}
+</div>
+{% endif %}
+
+{% if sim.status != 'completed' %}
+<div class="card text-center py-5">
+    <div class="card-body">
+        <i class="bi bi-hourglass-split text-muted" style="font-size: 4rem;"></i>
+        <h4 class="mt-3 text-muted">
+            {% if sim.status == 'running' %}仿真正在运行中，请稍候...{% else %}暂无仿真结果数据{% endif %}
+        </h4>
+        {% if sim.status == 'pending' %}
+        <p class="text-muted">点击右上角「开始仿真」按钮运行排队模拟</p>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-bar-chart"></i> 各任务等待时长对比</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="waitChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-pie-chart"></i> 各优先级表现分析</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="priorityChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-grid-3x3"></i> 驿站拥堵热力图（纵轴：驿站，横轴：时间）</span>
+                <small class="text-white-50">颜色越深表示排队越长</small>
+            </div>
+            <div class="card-body p-3 overflow-auto">
+                <div id="heatmapContainer"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-exclamation-triangle"></i> 瓶颈驿站排行 TOP {{ bottleneck_list|length }}</div>
+            <div class="card-body p-3">
+                {% if bottleneck_list %}
+                <div class="row g-3">
+                    {% for bn in bottleneck_list %}
+                    <div class="col-md-6">
+                        <div class="card bottleneck-card rank-{{ bn.rank }}">
+                            <div class="card-body p-3">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div>
+                                        <span class="badge {% if bn.rank == 1 %}bg-danger{% elif bn.rank == 2 %}bg-warning text-dark{% elif bn.rank == 3 %}bg-info{% else %}bg-secondary{% endif %}" style="font-size: 1rem;">
+                                            #{{ bn.rank }}
+                                        </span>
+                                        <strong class="ms-2 fs-5">{{ bn.code }}</strong>
+                                        <small class="text-muted d-block">{{ bn.name }}</small>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="fw-bold text-danger" style="font-size: 1.2rem;">{{ bn.score }}</div>
+                                        <small class="text-muted">瓶颈评分</small>
+                                    </div>
+                                </div>
+                                <div class="row g-2 small text-center">
+                                    <div class="col-3">
+                                        <div class="fw-bold">{{ bn.total_visits }}</div>
+                                        <div class="text-muted">访问</div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="fw-bold text-warning">{{ bn.avg_wait }}</div>
+                                        <div class="text-muted">平均等</div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="fw-bold text-danger">{{ bn.max_queue }}</div>
+                                        <div class="text-muted">最长队</div>
+                                    </div>
+                                    <div class="col-3">
+                                        <div class="fw-bold text-primary">{{ bn.avg_util }}%</div>
+                                        <div class="text-muted">利用率</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">暂无瓶颈数据</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-graph-up-arrow"></i> 送达时效波动分析</div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="fluctuationChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-list-ul"></i> 任务等待明细（前50条）</div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0" id="waitDetailTable">
+                        <thead class="sticky-top">
+                            <tr>
+                                <th>任务编号</th>
+                                <th>优先级</th>
+                                <th>总等待(时辰)</th>
+                                <th>单站最大等</th>
+                                <th>总送达(时辰)</th>
+                                <th>无拥堵预计</th>
+                                <th>延误(时辰)</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if peak_hours %}
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-sunrise"></i> 当前高峰时段配置</div>
+    <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+            <thead>
+                <tr>
+                    <th>驿站</th>
+                    <th>时段</th>
+                    <th>标签</th>
+                    <th>处理能力倍率</th>
+                    <th>到达率倍率</th>
+                    <th>时延增幅</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ph in peak_hours %}
+                <tr>
+                    <td><strong>{{ ph.station.code }}</strong> {{ ph.station.name }}</td>
+                    <td>{{ ph.start_hour }} - {{ ph.end_hour }} 时</td>
+                    <td>{{ ph.label|default:"-" }}</td>
+                    <td><span class="badge bg-warning text-dark">{{ ph.capacity_multiplier }}x</span></td>
+                    <td><span class="badge bg-info">{{ ph.arrival_multiplier }}x</span></td>
+                    <td><span class="badge bg-danger">{{ ph.process_delay_pct }}%</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if sim.status == 'completed' %}
+<script>
+const TASK_WAIT_LIST = {{ task_wait_list_json|safe }};
+const HEATMAP_DATA = {{ heatmap_data_json|safe }};
+const TIME_LABELS = {{ time_labels_json|safe }};
+const STATION_CODES = {{ station_codes_json|safe }};
+const BOTTLENECK_LIST = {{ bottleneck_list_json|safe }};
+const PRIORITY_ANALYSIS = {{ priority_analysis_json|safe }};
+const TIME_FLUCTUATION = {{ time_fluctuation_json|safe }};
+
+const PRIORITY_COLORS = {
+    1: '#6B7280',
+    2: '#F59E0B',
+    3: '#DC2626'
+};
+const PRIORITY_LABELS = {1: '普通', 2: '加急', 3: '八百里加急'};
+
+function renderWaitChart() {
+    const ctx = document.getElementById('waitChart').getContext('2d');
+    const sorted = [...TASK_WAIT_LIST].sort((a, b) => a.total_wait - b.total_wait);
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: sorted.map((_, i) => i + 1),
+            datasets: [{
+                label: '总等待时长(时辰)',
+                data: sorted.map(t => t.total_wait),
+                backgroundColor: sorted.map(t => PRIORITY_COLORS[t.priority]),
+                borderWidth: 0
+            }, {
+                label: '单站最大等待(时辰)',
+                data: sorted.map(t => t.max_wait),
+                type: 'line',
+                borderColor: '#8B4513',
+                backgroundColor: 'transparent',
+                pointRadius: 0,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: (ctx) => {
+                            const t = sorted[ctx.dataIndex];
+                            return [
+                                `任务: ${t.code}`,
+                                `优先级: ${PRIORITY_LABELS[t.priority]}`,
+                                t.is_delayed ? `⚠️ 延误: ${t.delay}时辰` : '✅ 准时'
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: '时辰' } },
+                x: { title: { display: true, text: '任务(按等待时长排序)' } }
+            }
+        }
+    });
+}
+
+function renderPriorityChart() {
+    const ctx = document.getElementById('priorityChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: PRIORITY_ANALYSIS.map(p => p.priority),
+            datasets: [{
+                label: '任务数量',
+                data: PRIORITY_ANALYSIS.map(p => p.count),
+                backgroundColor: ['#6B7280', '#F59E0B', '#DC2626'],
+                yAxisID: 'y'
+            }, {
+                label: '平均等待(时辰)',
+                data: PRIORITY_ANALYSIS.map(p => p.avg_wait),
+                type: 'line',
+                borderColor: '#8B4513',
+                backgroundColor: '#F4A460',
+                yAxisID: 'y1',
+                tension: 0.3,
+                fill: true
+            }, {
+                label: '延误率(%)',
+                data: PRIORITY_ANALYSIS.map(p => p.delay_rate),
+                type: 'line',
+                borderColor: '#C62828',
+                backgroundColor: 'transparent',
+                borderDash: [5, 5],
+                yAxisID: 'y2',
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: 'top' } },
+            scales: {
+                y: { type: 'linear', position: 'left', beginAtZero: true, title: {display: true, text: '任务数'} },
+                y1: { type: 'linear', position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, title: {display: true, text: '平均等待'} },
+                y2: { type: 'linear', position: 'right', beginAtZero: true, max: 100, display: false }
+            }
+        }
+    });
+}
+
+function renderHeatmap() {
+    const container = document.getElementById('heatmapContainer');
+    if (!STATION_CODES.length || !TIME_LABELS.length) {
+        container.innerHTML = '<div class="text-center text-muted py-4">暂无数据</div>';
+        return;
+    }
+
+    const cells = [];
+    let maxQueue = 0;
+    for (const code of STATION_CODES) {
+        const queues = HEATMAP_DATA[code] || [];
+        queues.forEach(q => { if (q > maxQueue) maxQueue = q; });
+    }
+
+    function getColor(q) {
+        if (q === 0) return 'rgba(46, 125, 50, 0.1)';
+        const ratio = Math.min(1, q / Math.max(1, maxQueue));
+        const r = Math.round(46 + (198 - 46) * ratio);
+        const g = Math.round(125 - (125 - 40) * ratio);
+        const b = Math.round(50 - (50 - 40) * ratio);
+        const a = 0.2 + ratio * 0.8;
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+
+    let html = '<table class="table table-bordered table-sm mb-0" style="font-size: 0.75rem;"><thead><tr><th style="min-width:80px;"></th>';
+    TIME_LABELS.forEach(t => {
+        html += `<th style="min-width:40px; text-align:center;" class="small">${t}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+
+    for (const code of STATION_CODES) {
+        html += `<tr><th class="small" style="background: var(--relay-light);">${code}</th>`;
+        const queues = HEATMAP_DATA[code] || [];
+        const totalCells = TIME_LABELS.length;
+        for (let i = 0; i < totalCells; i++) {
+            const qIdx = Math.min(i, queues.length - 1);
+            const q = queues[Math.max(0, qIdx)] || 0;
+            const color = getColor(q);
+            html += `<td class="heatmap-cell" style="background:${color}; text-align:center; padding: 0.25rem;" title="驿站: ${code}&#10;时间: ${TIME_LABELS[i]}时&#10;排队: ${q}人">
+                <small style="font-weight:600; color:${q > maxQueue * 0.6 ? 'white' : '#333'};">${q || ''}</small>
+            </td>`;
+        }
+        html += '</tr>';
+    }
+
+    html += '</tbody></table>';
+    html += `<div class="mt-3 d-flex align-items-center gap-2 small">
+        <span class="text-muted">队列长度:</span>
+        <span style="display:inline-block; width:20px; height:16px; background:${getColor(0)}; border:1px solid #ddd;"></span>0
+        <span style="display:inline-block; width:20px; height:16px; background:${getColor(Math.ceil(maxQueue * 0.25))}; border:1px solid #ddd;"></span>${Math.ceil(maxQueue * 0.25)}
+        <span style="display:inline-block; width:20px; height:16px; background:${getColor(Math.ceil(maxQueue * 0.5))}; border:1px solid #ddd;"></span>${Math.ceil(maxQueue * 0.5)}
+        <span style="display:inline-block; width:20px; height:16px; background:${getColor(Math.ceil(maxQueue * 0.75))}; border:1px solid #ddd;"></span>${Math.ceil(maxQueue * 0.75)}
+        <span style="display:inline-block; width:20px; height:16px; background:${getColor(maxQueue)}; border:1px solid #ddd;"></span>${maxQueue}+
+    </div>`;
+
+    container.innerHTML = html;
+}
+
+function renderFluctuationChart() {
+    const ctx = document.getElementById('fluctuationChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: TIME_FLUCTUATION.map(f => f.time + '时'),
+            datasets: [{
+                label: '实际平均送达(时辰)',
+                data: TIME_FLUCTUATION.map(f => f.avg_total),
+                borderColor: '#C62828',
+                backgroundColor: 'rgba(198, 40, 40, 0.1)',
+                fill: true,
+                tension: 0.3
+            }, {
+                label: '无拥堵预计送达(时辰)',
+                data: TIME_FLUCTUATION.map(f => f.avg_expected),
+                borderColor: '#2E7D32',
+                backgroundColor: 'transparent',
+                borderDash: [5, 5],
+                tension: 0.3
+            }, {
+                label: '时效波动(%)',
+                data: TIME_FLUCTUATION.map(f => f.fluctuation),
+                borderColor: '#F57C00',
+                backgroundColor: 'transparent',
+                yAxisID: 'y1',
+                tension: 0.3,
+                pointRadius: 4
+            }, {
+                label: '任务数',
+                data: TIME_FLUCTUATION.map(f => f.count),
+                type: 'bar',
+                backgroundColor: 'rgba(139, 69, 19, 0.3)',
+                yAxisID: 'y2',
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: { beginAtZero: true, position: 'left', title: { display: true, text: '送达时长(时辰)' } },
+                y1: { position: 'right', beginAtZero: true, title: { display: true, text: '波动(%)' }, grid: { drawOnChartArea: false } },
+                y2: { position: 'right', beginAtZero: true, display: false }
+            }
+        }
+    });
+}
+
+function renderWaitDetailTable() {
+    const tbody = document.querySelector('#waitDetailTable tbody');
+    const rows = TASK_WAIT_LIST.slice(0, 50).map(t => `
+        <tr class="${t.is_delayed ? 'risk-row' : ''}">
+            <td><code>${t.code}</code></td>
+            <td><span class="badge" style="background:${PRIORITY_COLORS[t.priority]};">${PRIORITY_LABELS[t.priority]}</span></td>
+            <td class="fw-bold ${t.total_wait > 1 ? 'text-danger' : ''}">${t.total_wait.toFixed(3)}</td>
+            <td>${t.max_wait.toFixed(3)}</td>
+            <td>${t.total_time.toFixed(3)}</td>
+            <td>${t.expected.toFixed(3)}</td>
+            <td class="${t.is_delayed ? 'text-danger fw-bold' : 'text-success'}">${t.is_delayed ? '+' + t.delay.toFixed(3) : '-'}</td>
+            <td>${t.is_delayed ? '<span class="badge badge-risk">延误</span>' : '<span class="badge badge-safe">准时</span>'}</td>
+        </tr>
+    `).join('');
+    tbody.innerHTML = rows;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    renderWaitChart();
+    renderPriorityChart();
+    renderHeatmap();
+    renderFluctuationChart();
+    renderWaitDetailTable();
+});
+</script>
+{% endif %}
+{% endblock %}

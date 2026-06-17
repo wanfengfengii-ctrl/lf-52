@@ -36,6 +36,17 @@ urlpatterns = [
     path('map/', views.map_view, name='map_view'),
     path('analysis/', views.analysis_dashboard, name='analysis_dashboard'),
 
+    path('simulations/', views.simulation_list, name='simulation_list'),
+    path('simulations/create/', views.simulation_create, name='simulation_create'),
+    path('simulations/<int:pk>/', views.simulation_detail, name='simulation_detail'),
+    path('simulations/<int:pk>/run/', views.simulation_run, name='simulation_run'),
+    path('simulations/<int:pk>/delete/', views.simulation_delete, name='simulation_delete'),
+
+    path('peak-hours/', views.peak_hour_list, name='peak_hour_list'),
+    path('peak-hours/create/', views.peak_hour_create, name='peak_hour_create'),
+    path('peak-hours/<int:pk>/update/', views.peak_hour_update, name='peak_hour_update'),
+    path('peak-hours/<int:pk>/delete/', views.peak_hour_delete, name='peak_hour_delete'),
+
     path('api/stations/', views.api_stations, name='api_stations'),
     path('api/roads/', views.api_roads, name='api_roads'),
     path('api/roads/create/', views.api_create_road, name='api_create_road'),
@@ -43,4 +54,5 @@ urlpatterns = [
     path('api/calculate/', views.api_calculate_route, name='api_calculate_route'),
     path('api/tasks/<int:pk>/plans/', views.api_task_plans, name='api_task_plans'),
     path('api/tasks/<int:task_pk>/segments/<int:segment_pk>/', views.api_segment_config, name='api_segment_config'),
+    path('api/simulations/<int:pk>/result/', views.api_simulation_result, name='api_simulation_result'),
 ]

@@ -1,14 +1,56 @@
 from django.contrib import admin
 from .models import (
     Station, Road, HorseChangeStrategy, WeatherRecord,
-    DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment
+    DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment,
+    StationPeakHour, SimulationRun, SimTask, SimStationVisit,
+    SimStationSnapshot, SimBottleneckStation,
 )
 
 
 @admin.register(Station)
 class StationAdmin(admin.ModelAdmin):
-    list_display = ['code', 'name', 'latitude', 'longitude', 'capacity', 'process_time']
+    list_display = ['code', 'name', 'latitude', 'longitude', 'capacity', 'window_count', 'process_time', 'queue_rule']
     search_fields = ['code', 'name']
+    list_filter = ['queue_rule']
+
+
+@admin.register(StationPeakHour)
+class StationPeakHourAdmin(admin.ModelAdmin):
+    list_display = ['station', 'start_hour', 'end_hour', 'capacity_multiplier', 'process_delay_pct', 'label']
+    list_filter = ['station']
+    search_fields = ['station__code', 'station__name', 'label']
+
+
+@admin.register(SimulationRun)
+class SimulationRunAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'task_count', 'status', 'avg_wait_time', 'max_wait_time', 'total_delay_count', 'created_at']
+    list_filter = ['status', 'enable_peak_hours']
+    search_fields = ['name']
+
+
+@admin.register(SimTask)
+class SimTaskAdmin(admin.ModelAdmin):
+    list_display = ['simulation', 'sim_task_code', 'priority', 'departure_time', 'arrival_time', 'total_wait_time', 'is_delayed']
+    list_filter = ['priority', 'is_delayed']
+    search_fields = ['sim_task_code']
+
+
+@admin.register(SimStationVisit)
+class SimStationVisitAdmin(admin.ModelAdmin):
+    list_display = ['sim_task', 'station_code', 'visit_order', 'arrive_time', 'wait_duration', 'process_duration', 'in_peak_hour']
+    list_filter = ['in_peak_hour', 'station_code']
+
+
+@admin.register(SimStationSnapshot)
+class SimStationSnapshotAdmin(admin.ModelAdmin):
+    list_display = ['simulation', 'station_code', 'snapshot_time', 'queue_length', 'busy_windows', 'total_windows', 'utilization']
+    list_filter = ['station_code', 'in_peak_hour']
+
+
+@admin.register(SimBottleneckStation)
+class SimBottleneckStationAdmin(admin.ModelAdmin):
+    list_display = ['simulation', 'rank', 'station_code', 'station_name', 'total_visits', 'avg_wait_time', 'max_queue_length', 'bottleneck_score']
+    list_filter = ['simulation']
 
 
 @admin.register(Road)

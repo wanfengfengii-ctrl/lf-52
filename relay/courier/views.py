@@ -5,12 +5,13 @@ from django.contrib import messages
 from django.db.models import Q
 from .models import (
     Station, Road, HorseChangeStrategy, WeatherRecord,
-    DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment
+    DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment,
+    SimulationRun, SimTask, SimStationVisit, SimBottleneckStation, StationPeakHour,
 )
 from .forms import (
     StationForm, RoadForm, HorseChangeStrategyForm,
     WeatherRecordForm, DeliveryTaskForm, DeliveryTaskStatusForm,
-    DeliverySegmentForm,
+    DeliverySegmentForm, SimulationRunForm, StationPeakHourForm,
 )
 from .engine import (
     calculate_delivery_time, recalculate_affected_tasks,
@@ -18,6 +19,7 @@ from .engine import (
     generate_all_plans, get_plan_comparison_data, get_gantt_data,
     find_all_paths,
 )
+from .simulation_engine import run_simulation, get_simulation_result_data
 
 
 def index(request):
@@ -661,4 +663,137 @@ def api_segment_config(request, task_pk, segment_pk):
         'override_weather': segment.override_weather,
         'departure_time': segment.departure_time,
         'segment_time': segment.segment_time,
+    })
+
+
+def simulation_list(request):
+    simulations = SimulationRun.objects.all()
+    return render(request, 'courier/simulation_list.html', {'simulations': simulations})
+
+
+def simulation_create(request):
+    if request.method == 'POST':
+        form = SimulationRunForm(request.POST)
+        if form.is_valid():
+            sim = form.save()
+            messages.success(request, f'仿真配置「{sim.name}」已创建')
+            return redirect('courier:simulation_detail', pk=sim.pk)
+    else:
+        form = SimulationRunForm()
+    return render(request, 'courier/simulation_form.html', {'form': form, 'title': '新建仿真配置'})
+
+
+def simulation_detail(request, pk):
+    sim = get_object_or_404(SimulationRun, pk=pk)
+    context = {
+        'sim': sim,
+        'peak_hours': StationPeakHour.objects.select_related('station').all(),
+    }
+    if sim.status == 'completed':
+        result_data = get_simulation_result_data(pk)
+        context.update({
+            'task_wait_list_json': json.dumps(result_data['task_wait_list'], ensure_ascii=False),
+            'heatmap_data_json': json.dumps(result_data['heatmap_data'], ensure_ascii=False),
+            'time_labels_json': json.dumps(result_data['time_labels'], ensure_ascii=False),
+            'station_codes_json': json.dumps(result_data['station_codes'], ensure_ascii=False),
+            'bottleneck_list_json': json.dumps(result_data['bottleneck_list'], ensure_ascii=False),
+            'priority_analysis_json': json.dumps(result_data['priority_analysis'], ensure_ascii=False),
+            'time_fluctuation_json': json.dumps(result_data['time_fluctuation'], ensure_ascii=False),
+            'bottleneck_list': result_data['bottleneck_list'],
+            'priority_analysis': result_data['priority_analysis'],
+        })
+    return render(request, 'courier/simulation_detail.html', context)
+
+
+def simulation_run(request, pk):
+    sim = get_object_or_404(SimulationRun, pk=pk)
+    if sim.status == 'running':
+        messages.warning(request, '该仿真正在运行中，请稍候')
+        return redirect('courier:simulation_detail', pk=pk)
+
+    sim.sim_tasks.all().delete()
+    sim.bottleneck_stations.all().delete()
+    sim.station_snapshots.all().delete()
+
+    result = run_simulation(pk)
+    if result['success']:
+        messages.success(
+            request,
+            f'仿真运行完成！共 {result["completed_tasks"]}/{result["total_tasks"]} 个任务完成递送'
+        )
+    else:
+        messages.error(request, f'仿真运行失败：{result.get("error", "未知错误")}')
+    return redirect('courier:simulation_detail', pk=pk)
+
+
+def simulation_delete(request, pk):
+    sim = get_object_or_404(SimulationRun, pk=pk)
+    if request.method == 'POST':
+        sim.delete()
+        messages.success(request, '仿真配置已删除')
+        return redirect('courier:simulation_list')
+    return render(request, 'courier/simulation_confirm_delete.html', {'sim': sim})
+
+
+def peak_hour_list(request):
+    peak_hours = StationPeakHour.objects.select_related('station').all()
+    return render(request, 'courier/peak_hour_list.html', {'peak_hours': peak_hours})
+
+
+def peak_hour_create(request):
+    if request.method == 'POST':
+        form = StationPeakHourForm(request.POST)
+        if form.is_valid():
+            ph = form.save()
+            messages.success(request, f'高峰时段配置已创建：{ph}')
+            return redirect('courier:peak_hour_list')
+    else:
+        form = StationPeakHourForm()
+    return render(request, 'courier/peak_hour_form.html', {'form': form, 'title': '新建高峰时段'})
+
+
+def peak_hour_update(request, pk):
+    ph = get_object_or_404(StationPeakHour, pk=pk)
+    if request.method == 'POST':
+        form = StationPeakHourForm(request.POST, instance=ph)
+        if form.is_valid():
+            form.save()
+            messages.success(request, '高峰时段配置已更新')
+            return redirect('courier:peak_hour_list')
+    else:
+        form = StationPeakHourForm(instance=ph)
+    return render(request, 'courier/peak_hour_form.html', {'form': form, 'title': '编辑高峰时段'})
+
+
+def peak_hour_delete(request, pk):
+    ph = get_object_or_404(StationPeakHour, pk=pk)
+    if request.method == 'POST':
+        ph.delete()
+        messages.success(request, '高峰时段配置已删除')
+        return redirect('courier:peak_hour_list')
+    return render(request, 'courier/peak_hour_confirm_delete.html', {'peak_hour': ph})
+
+
+def api_simulation_result(request, pk):
+    sim = get_object_or_404(SimulationRun, pk=pk)
+    if sim.status != 'completed':
+        return JsonResponse({'error': '仿真尚未完成运行'}, status=400)
+    result_data = get_simulation_result_data(pk)
+    return JsonResponse({
+        'simulation': {
+            'id': sim.pk,
+            'name': sim.name,
+            'total_tasks': sim.total_tasks_simulated,
+            'avg_wait': sim.avg_wait_time,
+            'max_wait': sim.max_wait_time,
+            'avg_total': sim.avg_total_time,
+            'delay_count': sim.total_delay_count,
+        },
+        'task_wait_list': result_data['task_wait_list'],
+        'heatmap': result_data['heatmap_data'],
+        'time_labels': result_data['time_labels'],
+        'station_codes': result_data['station_codes'],
+        'bottlenecks': result_data['bottleneck_list'],
+        'priority_analysis': result_data['priority_analysis'],
+        'time_fluctuation': result_data['time_fluctuation'],
     })

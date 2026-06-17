@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }} - 驿站文书递送模拟系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-sunrise"></i> {{ title }}</h2>
+    <a href="{% url 'courier:peak_hour_list' %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">高峰时段参数</div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">{{ form.station.label }}</label>
+                        {{ form.station }}
+                        {% if form.station.errors %}
+                        <div class="text-danger small">{{ form.station.errors }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-5">
+                            <label class="form-label">{{ form.start_hour.label }}</label>
+                            {{ form.start_hour }}
+                            <div class="form-text">时辰，0-24</div>
+                        </div>
+                        <div class="col-md-2 text-center pt-4">
+                            <span class="text-muted fs-4">—</span>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">{{ form.end_hour.label }}</label>
+                            {{ form.end_hour }}
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">{{ form.label.label }}</label>
+                        {{ form.label }}
+                        <div class="form-text">如「早朝高峰」「傍晚换班」等</div>
+                    </div>
+                    <hr>
+                    <h5 class="mb-3">影响参数</h5>
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.capacity_multiplier.label }}</label>
+                            <div class="input-group">
+                                {{ form.capacity_multiplier }}
+                                <span class="input-group-text">倍</span>
+                            </div>
+                            <div class="form-text">小于1表示处理能力下降（如 0.6 = 窗口数降至60%）</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.arrival_multiplier.label }}</label>
+                            <div class="input-group">
+                                {{ form.arrival_multiplier }}
+                                <span class="input-group-text">倍</span>
+                            </div>
+                            <div class="form-text">大于1表示到达任务更多（如 1.8 = 到达率提升80%）</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ form.process_delay_pct.label }}</label>
+                            <div class="input-group">
+                                {{ form.process_delay_pct }}
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <div class="form-text">处理时间增幅（如 30 = 耗时增加30%）</div>
+                        </div>
+                    </div>
+
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger">
+                        {{ form.non_field_errors }}
+                    </div>
+                    {% endif %}
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> 保存
+                        </button>
+                        <a href="{% url 'courier:peak_hour_list' %}" class="btn btn-outline-secondary">取消</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-lightbulb"></i> 配置建议</div>
+            <div class="card-body small">
+                <div class="mb-3">
+                    <h6>典型配置示例：</h6>
+                    <div class="border rounded p-2 mb-2 bg-light">
+                        <strong>早朝（辰时）：</strong><br>
+                        时段: 7 - 9 时<br>
+                        处理能力: 0.7x, 到达率: 1.8x, 时延: +25%
+                    </div>
+                    <div class="border rounded p-2 mb-2 bg-light">
+                        <strong>傍晚（酉时）：</strong><br>
+                        时段: 17 - 19 时<br>
+                        处理能力: 0.6x, 到达率: 2.0x, 时延: +35%
+                    </div>
+                    <div class="border rounded p-2 bg-light">
+                        <strong>深夜换班：</strong><br>
+                        时段: 23 - 1 时<br>
+                        处理能力: 0.4x, 到达率: 0.3x, 时延: +50%
+                    </div>
+                </div>
+                <hr>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> 为枢纽站配置多个时段</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> 处理能力倍率建议 0.4 - 0.8</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> 到达率倍率建议 1.5 - 2.5</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> 时延增幅建议 20% - 60%</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
