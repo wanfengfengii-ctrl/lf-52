@@ -8,6 +8,13 @@
     <a href="{% url 'courier:task_list' %}" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> 返回列表</a>
 </div>
 
+{% if task.delay_warning %}
+<div class="alert alert-warning" role="alert">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <strong>延误预警：</strong>该任务存在延误风险！建议切换为最稳妥方案或调整路段策略以降低风险。
+</div>
+{% endif %}
+
 <div class="row g-4">
     <div class="col-md-6">
         <div class="card">
@@ -19,6 +26,9 @@
                     <tr><th class="text-muted">终点</th><td>{{ task.destination.code }} - {{ task.destination.name }}</td></tr>
                     <tr><th class="text-muted">优先级</th><td>{{ task.get_priority_display }}</td></tr>
                     <tr><th class="text-muted">换马策略</th><td>{{ task.strategy.name|default:"—" }}</td></tr>
+                    <tr><th class="text-muted">要求时限</th><td>{{ task.deadline_hours|default:"—" }} 时辰</td></tr>
+                    <tr><th class="text-muted">出发偏移</th><td>{{ task.departure_offset|default:"0" }} 时辰</td></tr>
+                    <tr><th class="text-muted">选用方案</th><td><span class="badge bg-info">{{ task.get_selected_plan_type_display }}</span></td></tr>
                     <tr>
                         <th class="text-muted">状态</th>
                         <td>
@@ -35,7 +45,7 @@
                             {% endif %}
                         </td>
                     </tr>
-                    <tr><th class="text-muted">预计时辰</th><td>{{ task.estimated_hours|default:"—" }}</td></tr>
+                    <tr><th class="text-muted">预计时辰</th><td><strong style="font-size:1.1rem;">{{ task.estimated_hours|default:"—" }}</strong></td></tr>
                     <tr><th class="text-muted">实际时辰</th><td>{{ task.actual_hours|default:"—" }}</td></tr>
                     <tr>
                         <th class="text-muted">风险</th>
@@ -44,6 +54,16 @@
                                 <span class="badge bg-danger">高风险</span>
                             {% else %}
                                 <span class="badge bg-success">安全</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th class="text-muted">延误预警</th>
+                        <td>
+                            {% if task.delay_warning %}
+                                <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> 有风险</span>
+                            {% else %}
+                                <span class="badge bg-success">正常</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -73,31 +93,132 @@
     </div>
 </div>
 
+{% if plans %}
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-diagram-3"></i> 多方案对比
+        <span class="text-muted small ms-2">点击选择不同方案查看差异</span>
+    </div>
+    <div class="card-body">
+        <form method="post" id="planSelectForm">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="select_plan">
+            <div class="row g-3">
+                {% for plan in plans %}
+                <div class="col-md-3">
+                    <div class="card plan-card {% if plan.plan_type == task.selected_plan_type %}border-primary shadow{% endif %}"
+                         style="cursor:pointer;" onclick="selectPlan('{{ plan.plan_type }}')">
+                        <div class="card-body text-center">
+                            <h6 class="mb-2">
+                                {% if plan.plan_type == 'fastest' %}
+                                    <i class="bi bi-lightning-charge"></i>
+                                {% elif plan.plan_type == 'safest' %}
+                                    <i class="bi bi-shield-check"></i>
+                                {% elif plan.plan_type == 'balanced' %}
+                                    <i class="bi bi-balance"></i>
+                                {% else %}
+                                    <i class="bi bi-shuffle"></i>
+                                {% endif %}
+                                {{ plan.get_plan_type_display }}
+                            </h6>
+                            <div class="fs-3 fw-bold text-primary">{{ plan.total_time }}</div>
+                            <div class="text-muted small">总时辰</div>
+                            <div class="mt-2 small">
+                                <div>距离：{{ plan.total_distance }} 里</div>
+                                <div>途经：{{ plan.station_count }} 站</div>
+                                <div>
+                                    风险：
+                                    {% if plan.risk_count > 0 %}
+                                        <span class="text-danger">{{ plan.risk_count }} 段高风险</span>
+                                    {% else %}
+                                        <span class="text-success">无风险</span>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    延误概率：
+                                    {% if plan.is_delay_risk %}
+                                        <span class="text-warning">{{ plan.delay_probability|floatformat:0 }}%</span>
+                                    {% else %}
+                                        <span class="text-success">{{ plan.delay_probability|floatformat:0 }}%</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% if plan.plan_type == task.selected_plan_type %}
+                            <div class="mt-2"><span class="badge bg-primary">当前选用</span></div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <input type="radio" name="plan_type" value="{{ plan.plan_type }}" class="d-none" id="plan_{{ plan.plan_type }}">
+                </div>
+                {% endfor %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-bar-chart-line"></i> 方案对比图表</div>
+    <div class="card-body">
+        <canvas id="planCompareChart" height="200"></canvas>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-calendar3"></i> 调度甘特图</div>
+    <div class="card-body">
+        <canvas id="ganttChart" height="300"></canvas>
+    </div>
+</div>
+{% endif %}
+
 {% if segment_details %}
 <div class="card mt-4">
-    <div class="card-header"><i class="bi bi-list-ol"></i> 递送段详情</div>
+    <div class="card-header">
+        <i class="bi bi-list-ol"></i> 递送段详情与独立配置
+        <span class="text-muted small ms-2">可为每个路段单独设置换马策略、天气条件和出发时间</span>
+    </div>
+    <form method="post" id="segmentConfigForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_segments">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
                     <th>顺序</th>
                     <th>路线</th>
-                    <th>距离（里）</th>
-                    <th>行进时间</th>
-                    <th>换马时间</th>
+                    <th>距离</th>
+                    <th>行进</th>
+                    <th>换马</th>
+                    <th>中转</th>
                     <th>总时间</th>
+                    <th>本段策略</th>
+                    <th>本段天气</th>
+                    <th>出发时间</th>
                     <th>风险</th>
                 </tr>
             </thead>
             <tbody>
-                {% for item in segment_details %}
+                {% for item, form in segment_details_zip %}
                 <tr class="{% if item.detail.is_high_risk %}risk-row{% endif %}">
-                    <td>{{ item.segment.order }}</td>
+                    <td><strong>{{ item.segment.order }}</strong></td>
                     <td>{{ item.segment.road.from_station.code }} → {{ item.segment.road.to_station.code }}</td>
-                    <td>{{ item.detail.distance|floatformat:1 }}</td>
+                    <td>{{ item.detail.distance|floatformat:1 }} 里</td>
                     <td>{{ item.detail.travel_time|floatformat:2 }}</td>
                     <td>{{ item.detail.horse_change_time|floatformat:2 }}</td>
-                    <td>{{ item.detail.total_time|floatformat:2 }}</td>
+                    <td>{{ item.detail.process_time|floatformat:2 }}</td>
+                    <td><strong>{{ item.detail.total_time|floatformat:2 }}</strong></td>
+                    <td>
+                        {{ form.override_strategy }}
+                        {% if form.override_strategy.errors %}<div class="text-danger small">{{ form.override_strategy.errors }}</div>{% endif %}
+                    </td>
+                    <td>
+                        {{ form.override_weather }}
+                        {% if form.override_weather.errors %}<div class="text-danger small">{{ form.override_weather.errors }}</div>{% endif %}
+                    </td>
+                    <td>
+                        {{ form.departure_time }}
+                        {% if form.departure_time.errors %}<div class="text-danger small">{{ form.departure_time.errors }}</div>{% endif %}
+                    </td>
                     <td>
                         {% if item.detail.is_high_risk %}
                             <span class="badge bg-danger">高风险</span>
@@ -110,6 +231,10 @@
             </tbody>
         </table>
     </div>
+    <div class="card-footer">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-save"></i> 保存路段配置并重新计算</button>
+    </div>
+    </form>
 </div>
 
 <div class="card mt-4">
@@ -124,40 +249,183 @@
 {% block extra_js %}
 <script>
     var chartData = {{ chart_data|safe }};
-    var ctx = document.getElementById('segmentChart').getContext('2d');
-    var riskColors = chartData.risks.map(function(r) { return r ? 'rgba(220, 53, 69, 0.7)' : 'rgba(13, 110, 253, 0.7)'; });
-    var riskBorders = chartData.risks.map(function(r) { return r ? 'rgba(220, 53, 69, 1)' : 'rgba(13, 110, 253, 1)'; });
-    new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: chartData.labels,
-            datasets: [
-                {
-                    label: '行进时间（时辰）',
-                    data: chartData.travel_times,
-                    backgroundColor: riskColors,
-                    borderColor: riskBorders,
-                    borderWidth: 1
-                },
-                {
-                    label: '换马时间（时辰）',
-                    data: chartData.horse_change_times,
-                    backgroundColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 193, 7, 0.7)' : 'rgba(108, 117, 125, 0.7)'; }),
-                    borderColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 193, 7, 1)' : 'rgba(108, 117, 125, 1)'; }),
-                    borderWidth: 1
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            scales: {
-                x: { stacked: true },
-                y: { stacked: true, title: { display: true, text: '时辰' } }
+    var planComparison = {{ plan_comparison|safe }};
+    var ganttData = {{ gantt_data|safe }};
+
+    var ctx = document.getElementById('segmentChart');
+    if (ctx) {
+        var riskColors = chartData.risks.map(function(r) { return r ? 'rgba(220, 53, 69, 0.7)' : 'rgba(13, 110, 253, 0.7)'; });
+        var riskBorders = chartData.risks.map(function(r) { return r ? 'rgba(220, 53, 69, 1)' : 'rgba(13, 110, 253, 1)'; });
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: chartData.labels,
+                datasets: [
+                    {
+                        label: '行进时间（时辰）',
+                        data: chartData.travel_times,
+                        backgroundColor: riskColors,
+                        borderColor: riskBorders,
+                        borderWidth: 1
+                    },
+                    {
+                        label: '换马时间（时辰）',
+                        data: chartData.horse_change_times,
+                        backgroundColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 193, 7, 0.7)' : 'rgba(108, 117, 125, 0.7)'; }),
+                        borderColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 193, 7, 1)' : 'rgba(108, 117, 125, 1)'; }),
+                        borderWidth: 1
+                    },
+                    {
+                        label: '中转处理时间（时辰）',
+                        data: chartData.process_times,
+                        backgroundColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 87, 34, 0.7)' : 'rgba(40, 167, 69, 0.7)'; }),
+                        borderColor: chartData.risks.map(function(r) { return r ? 'rgba(255, 87, 34, 1)' : 'rgba(40, 167, 69, 1)'; }),
+                        borderWidth: 1
+                    }
+                ]
             },
-            plugins: {
-                legend: { position: 'top' }
+            options: {
+                responsive: true,
+                scales: {
+                    x: { stacked: true },
+                    y: { stacked: true, title: { display: true, text: '时辰' } }
+                },
+                plugins: {
+                    legend: { position: 'top' }
+                }
             }
-        }
-    });
+        });
+    }
+
+    var pcc = document.getElementById('planCompareChart');
+    if (pcc && planComparison && planComparison.length > 0) {
+        var planLabels = planComparison.map(function(p) { return p.plan_type_display; });
+        var planTimes = planComparison.map(function(p) { return p.total_time; });
+        var planRisks = planComparison.map(function(p) { return p.risk_count; });
+        var planDelays = planComparison.map(function(p) { return p.delay_probability * 100; });
+        var planColors = planTimes.map(function(t, i) {
+            return planComparison[i].is_delay_risk ? 'rgba(255, 193, 7, 0.7)' : 'rgba(13, 110, 253, 0.7)';
+        });
+        new Chart(pcc, {
+            data: {
+                labels: planLabels,
+                datasets: [
+                    {
+                        type: 'bar',
+                        label: '总耗时（时辰）',
+                        data: planTimes,
+                        backgroundColor: planColors,
+                        yAxisID: 'y'
+                    },
+                    {
+                        type: 'line',
+                        label: '高风险段数',
+                        data: planRisks,
+                        borderColor: 'rgba(220, 53, 69, 1)',
+                        backgroundColor: 'rgba(220, 53, 69, 0.2)',
+                        yAxisID: 'y1',
+                        tension: 0.3
+                    },
+                    {
+                        type: 'line',
+                        label: '延误概率（%）',
+                        data: planDelays,
+                        borderColor: 'rgba(255, 152, 0, 1)',
+                        backgroundColor: 'rgba(255, 152, 0, 0.2)',
+                        yAxisID: 'y1',
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: '时辰' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        title: { display: true, text: '数量/概率(%)' },
+                        grid: { drawOnChartArea: false }
+                    }
+                },
+                plugins: { legend: { position: 'top' } }
+            }
+        });
+    }
+
+    var ganttCtx = document.getElementById('ganttChart');
+    if (ganttCtx && ganttData && ganttData.length > 0) {
+        var planTypes = [...new Set(ganttData.map(function(g) { return g.plan_type_display; }))];
+        var taskLabels = [...new Set(ganttData.map(function(g) { return g.task; }))];
+        var datasets = [];
+        var planColorMap = {};
+        planTypes.forEach(function(pt, i) {
+            var colors = ['rgba(13,110,253,0.7)', 'rgba(40,167,69,0.7)', 'rgba(255,193,7,0.7)', 'rgba(111,66,193,0.7)'];
+            planColorMap[pt] = colors[i % colors.length];
+        });
+        planTypes.forEach(function(pt) {
+            var bg = planColorMap[pt];
+            var data = [];
+            taskLabels.forEach(function(tl) {
+                var item = ganttData.find(function(g) { return g.plan_type_display === pt && g.task === tl; });
+                if (item) {
+                    var color = item.is_high_risk ? 'rgba(220,53,69,0.8)' : bg;
+                    data.push([item.start, item.end]);
+                } else {
+                    data.push([null, null]);
+                }
+            });
+            datasets.push({
+                label: pt,
+                data: data,
+                backgroundColor: bg,
+                borderColor: bg.replace('0.7', '1'),
+                borderWidth: 1
+            });
+        });
+        new Chart(ganttCtx, {
+            type: 'bar',
+            data: {
+                labels: taskLabels,
+                datasets: datasets
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                scales: {
+                    x: {
+                    stacked: false,
+                    title: { display: true, text: '时辰' }
+                },
+                y: {
+                    title: { display: true, text: '路段' }
+                }
+            },
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var raw = ctx.raw;
+                                if (raw && raw[0] !== null) {
+                                    return ctx.dataset.label + ': ' + raw[0] + ' → ' + raw[1] + ' 时辰';
+                                }
+                                return '';
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function selectPlan(planType) {
+        document.getElementById('plan_' + planType).checked = true;
+        document.getElementById('planSelectForm').submit();
+    }
 </script>
 {% endblock %}

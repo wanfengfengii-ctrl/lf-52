@@ -5,7 +5,7 @@
 {% block content %}
 <div class="hero-section rounded mb-4">
     <h1 class="display-5 fw-bold"><i class="bi bi-signpost-2"></i> 驿站文书递送模拟系统</h1>
-    <p class="lead mt-3">模拟古代驿站文书递送，分析不同驿站间距、换马规则、天气和道路等级对送达时间的影响</p>
+    <p class="lead mt-3">多驿站接力调度优化：自动计算最优接力路线，支持独立路段策略、延误预警与可视化调度分析</p>
 </div>
 
 <div class="row g-4 mb-4">
@@ -39,6 +39,21 @@
     </div>
 </div>
 
+{% if delayed_warning_count > 0 or high_risk_count > 0 %}
+<div class="alert alert-warning alert-dismissible fade show" role="alert">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <strong>调度预警：</strong>
+    {% if delayed_warning_count > 0 %}
+        <span class="badge bg-danger">{{ delayed_warning_count }} 个任务存在延误风险</span>
+    {% endif %}
+    {% if high_risk_count > 0 %}
+        <span class="badge bg-warning text-dark ms-2">{{ high_risk_count }} 个任务含高风险路段</span>
+    {% endif %}
+    <a href="{% url 'courier:analysis_dashboard' %}" class="alert-link ms-2">查看详情 →</a>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
 <div class="row g-4">
     <div class="col-md-6">
         <div class="card">
@@ -53,7 +68,7 @@
         <div class="card">
             <div class="card-header"><i class="bi bi-graph-up"></i> 时效分析</div>
             <div class="card-body">
-                <p>分析不同因素对递送时间的影响，比较换马策略，识别延误风险路段。</p>
+                <p>多方案对比分析、延误预警、调度甘特图，全面掌握递送时效。</p>
                 <a href="{% url 'courier:analysis_dashboard' %}" class="btn btn-primary"><i class="bi bi-bar-chart"></i> 查看分析</a>
             </div>
         </div>

@@ -17,20 +17,22 @@
                     <th>任务编号</th>
                     <th>路线</th>
                     <th>优先级</th>
-                    <th>策略</th>
+                    <th>方案</th>
                     <th>状态</th>
                     <th>预计时辰</th>
+                    <th>时限</th>
                     <th>风险</th>
+                    <th>预警</th>
                     <th>操作</th>
                 </tr>
             </thead>
             <tbody>
                 {% for task in tasks %}
-                <tr>
+                <tr class="{% if task.delay_warning %}table-warning{% elif task.has_high_risk %}table-danger-light{% endif %}">
                     <td><strong>{{ task.task_code }}</strong></td>
                     <td>{{ task.origin.code }} → {{ task.destination.code }}</td>
                     <td>{{ task.get_priority_display }}</td>
-                    <td>{{ task.strategy.name|default:"—" }}</td>
+                    <td><span class="badge bg-info">{{ task.get_selected_plan_type_display }}</span></td>
                     <td>
                         {% if task.status == 'draft' %}
                             <span class="badge bg-secondary">{{ task.get_status_display }}</span>
@@ -44,12 +46,20 @@
                             <span class="badge bg-danger">{{ task.get_status_display }}</span>
                         {% endif %}
                     </td>
-                    <td>{{ task.estimated_hours|default:"—" }}</td>
+                    <td><strong>{{ task.estimated_hours|default:"—" }}</strong></td>
+                    <td>{{ task.deadline_hours|default:"—" }}</td>
                     <td>
                         {% if task.has_high_risk %}
                             <span class="badge bg-danger">高风险</span>
                         {% else %}
                             <span class="badge bg-success">安全</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if task.delay_warning %}
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i> 延误预警</span>
+                        {% else %}
+                            <span class="badge bg-success">正常</span>
                         {% endif %}
                     </td>
                     <td>

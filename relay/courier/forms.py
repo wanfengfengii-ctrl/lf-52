@@ -1,11 +1,11 @@
 from django import forms
-from .models import Station, Road, HorseChangeStrategy, WeatherRecord, DeliveryTask
+from .models import Station, Road, HorseChangeStrategy, WeatherRecord, DeliveryTask, DeliverySegment
 
 
 class StationForm(forms.ModelForm):
     class Meta:
         model = Station
-        fields = ['code', 'name', 'latitude', 'longitude', 'description']
+        fields = ['code', 'name', 'latitude', 'longitude', 'capacity', 'process_time', 'description']
         widgets = {
             'description': forms.Textarea(attrs={'rows': 3}),
         }
@@ -69,11 +69,12 @@ class WeatherRecordForm(forms.ModelForm):
 class DeliveryTaskForm(forms.ModelForm):
     class Meta:
         model = DeliveryTask
-        fields = ['task_code', 'origin', 'destination', 'strategy', 'priority']
+        fields = ['task_code', 'origin', 'destination', 'strategy', 'priority', 'deadline_hours', 'departure_offset', 'selected_plan_type']
         widgets = {
             'origin': forms.Select(attrs={'class': 'form-select'}),
             'destination': forms.Select(attrs={'class': 'form-select'}),
             'strategy': forms.Select(attrs={'class': 'form-select'}),
+            'selected_plan_type': forms.Select(attrs={'class': 'form-select'}),
         }
 
     def clean(self):
@@ -83,6 +84,16 @@ class DeliveryTaskForm(forms.ModelForm):
         if origin and destination and origin == destination:
             raise forms.ValidationError('起点和终点不能相同')
         return cleaned_data
+
+
+class DeliverySegmentForm(forms.ModelForm):
+    class Meta:
+        model = DeliverySegment
+        fields = ['override_strategy', 'override_weather', 'departure_time']
+        widgets = {
+            'override_strategy': forms.Select(attrs={'class': 'form-select'}),
+            'override_weather': forms.Select(attrs={'class': 'form-select'}),
+        }
 
 
 class DeliveryTaskStatusForm(forms.ModelForm):

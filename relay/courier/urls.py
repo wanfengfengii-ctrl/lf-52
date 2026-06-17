@@ -41,4 +41,6 @@ urlpatterns = [
     path('api/roads/create/', views.api_create_road, name='api_create_road'),
     path('api/strategies/', views.api_strategies, name='api_strategies'),
     path('api/calculate/', views.api_calculate_route, name='api_calculate_route'),
+    path('api/tasks/<int:pk>/plans/', views.api_task_plans, name='api_task_plans'),
+    path('api/tasks/<int:task_pk>/segments/<int:segment_pk>/', views.api_segment_config, name='api_segment_config'),
 ]

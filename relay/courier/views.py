@@ -3,14 +3,20 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.http import JsonResponse
 from django.contrib import messages
 from django.db.models import Q
-from .models import Station, Road, HorseChangeStrategy, WeatherRecord, DeliveryTask, DeliverySegment
+from .models import (
+    Station, Road, HorseChangeStrategy, WeatherRecord,
+    DeliveryTask, DeliverySegment, DeliveryPlan, PlanSegment
+)
 from .forms import (
     StationForm, RoadForm, HorseChangeStrategyForm,
     WeatherRecordForm, DeliveryTaskForm, DeliveryTaskStatusForm,
+    DeliverySegmentForm,
 )
 from .engine import (
     calculate_delivery_time, recalculate_affected_tasks,
     get_analysis_data, find_path, calculate_segment_time,
+    generate_all_plans, get_plan_comparison_data, get_gantt_data,
+    find_all_paths,
 )
 
 
@@ -19,11 +25,15 @@ def index(request):
     road_count = Road.objects.count()
     task_count = DeliveryTask.objects.count()
     strategy_count = HorseChangeStrategy.objects.count()
+    delayed_warning_count = DeliveryTask.objects.filter(delay_warning=True).count()
+    high_risk_count = DeliveryTask.objects.filter(has_high_risk=True).count()
     return render(request, 'courier/index.html', {
         'station_count': station_count,
         'road_count': road_count,
         'task_count': task_count,
         'strategy_count': strategy_count,
+        'delayed_warning_count': delayed_warning_count,
+        'high_risk_count': high_risk_count,
     })
 
 
@@ -231,7 +241,11 @@ def task_create(request):
 
             task.save()
             calculate_delivery_time(task, force_recalculate=True)
-            messages.success(request, f'递送任务创建成功，预计送达时间：{task.estimated_hours}时辰')
+            msg = f'递送任务创建成功，预计送达时间：{task.estimated_hours}时辰'
+            if task.delay_warning:
+                messages.warning(request, msg + ' 【延误预警】该任务存在延误风险！')
+            else:
+                messages.success(request, msg)
             return redirect('courier:task_detail', pk=task.pk)
     else:
         form = DeliveryTaskForm()
@@ -240,24 +254,61 @@ def task_create(request):
 
 def task_detail(request, pk):
     task = get_object_or_404(DeliveryTask, pk=pk)
-    segments = task.segments.select_related('road', 'road__from_station', 'road__to_station').all()
+    segments = task.segments.select_related('road', 'road__from_station', 'road__to_station', 'override_strategy').all()
 
     segment_details = []
+    segment_forms = []
     for seg in segments:
         road = seg.road
-        result = calculate_segment_time(road=road, priority=task.priority, strategy=task.strategy)
+        result = calculate_segment_time(
+            road=road, priority=task.priority, strategy=task.strategy, segment=seg
+        )
         segment_details.append({
             'segment': seg,
             'detail': result,
         })
+        if request.method == 'GET':
+            segment_forms.append(DeliverySegmentForm(instance=seg, prefix=f'seg_{seg.pk}'))
 
     chart_data = get_analysis_data(task)
+    plan_comparison = get_plan_comparison_data(task)
+    gantt_data = get_gantt_data(task)
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'select_plan':
+            plan_type = request.POST.get('plan_type')
+            if plan_type in dict(DeliveryTask.PLAN_TYPE_CHOICES):
+                task.selected_plan_type = plan_type
+                task.save()
+                calculate_delivery_time(task, force_recalculate=True)
+                messages.success(request, f'已切换为「{task.get_selected_plan_type_display()}」方案')
+                return redirect('courier:task_detail', pk=task.pk)
+        elif action == 'update_segments':
+            all_valid = True
+            for seg in segments:
+                form = DeliverySegmentForm(request.POST, instance=seg, prefix=f'seg_{seg.pk}')
+                if form.is_valid():
+                    form.save()
+                else:
+                    all_valid = False
+            if all_valid:
+                calculate_delivery_time(task, force_recalculate=True)
+                messages.success(request, '路段独立配置已更新，已重新计算送达时间')
+            else:
+                messages.error(request, '配置有误，请检查')
+            return redirect('courier:task_detail', pk=task.pk)
 
     context = {
         'task': task,
         'segments': segments,
         'segment_details': segment_details,
+        'segment_forms': segment_forms,
+        'segment_details_zip': list(zip(segment_details, segment_forms)),
         'chart_data': json.dumps(chart_data, ensure_ascii=False),
+        'plan_comparison': json.dumps(plan_comparison, ensure_ascii=False),
+        'gantt_data': json.dumps(gantt_data, ensure_ascii=False),
+        'plans': task.plans.select_related().all(),
     }
     return render(request, 'courier/task_detail.html', context)
 
@@ -289,7 +340,11 @@ def task_delete(request, pk):
 def task_recalculate(request, pk):
     task = get_object_or_404(DeliveryTask, pk=pk)
     calculate_delivery_time(task, force_recalculate=True)
-    messages.success(request, f'已重新计算，预计送达时间：{task.estimated_hours}时辰')
+    msg = f'已重新计算，预计送达时间：{task.estimated_hours}时辰'
+    if task.delay_warning:
+        messages.warning(request, msg + ' 【延误预警】存在延误风险！')
+    else:
+        messages.success(request, msg)
     return redirect('courier:task_detail', pk=task.pk)
 
 
@@ -305,6 +360,8 @@ def map_view(request):
             'name': s.name,
             'lat': s.latitude,
             'lng': s.longitude,
+            'capacity': s.capacity,
+            'process_time': s.process_time,
         }
         for s in stations
     ], ensure_ascii=False)
@@ -344,9 +401,11 @@ def analysis_dashboard(request):
     for task in tasks:
         if task.estimated_hours:
             chart = get_analysis_data(task)
+            plan_comparison = get_plan_comparison_data(task)
             task_data.append({
                 'task': task,
                 'chart_data': json.dumps(chart, ensure_ascii=False),
+                'plan_comparison': json.dumps(plan_comparison, ensure_ascii=False),
             })
 
     all_strategies = HorseChangeStrategy.objects.all()
@@ -365,10 +424,26 @@ def analysis_dashboard(request):
                     'time': round(total, 2),
                 })
 
+    delay_warning_tasks = DeliveryTask.objects.filter(delay_warning=True).select_related('origin', 'destination')
+    delay_data = []
+    for t in delay_warning_tasks:
+        plans = t.plans.all()
+        min_time = min((p.total_time for p in plans), default=t.estimated_hours or 0)
+        delay_data.append({
+            'task_code': t.task_code,
+            'route': f'{t.origin.code}→{t.destination.code}',
+            'estimated': t.estimated_hours,
+            'deadline': t.deadline_hours,
+            'fastest': min_time,
+            'plans_count': plans.count(),
+        })
+
     context = {
         'task_data': task_data,
         'comparison_data': json.dumps(comparison_data, ensure_ascii=False),
         'comparison_available': len(comparison_data) >= 2,
+        'delay_data': json.dumps(delay_data, ensure_ascii=False),
+        'delay_count': len(delay_data),
     }
     return render(request, 'courier/analysis.html', context)
 
@@ -376,7 +451,8 @@ def analysis_dashboard(request):
 def api_stations(request):
     stations = Station.objects.all()
     data = [
-        {'id': s.pk, 'code': s.code, 'name': s.name, 'lat': s.latitude, 'lng': s.longitude}
+        {'id': s.pk, 'code': s.code, 'name': s.name, 'lat': s.latitude, 'lng': s.longitude,
+         'capacity': s.capacity, 'process_time': s.process_time}
         for s in stations
     ]
     return JsonResponse(data, safe=False)
@@ -469,36 +545,120 @@ def api_calculate_route(request):
     dest_id = request.GET.get('destination')
     strategy_id = request.GET.get('strategy')
     priority = int(request.GET.get('priority', 1))
+    deadline = request.GET.get('deadline')
+    plan_type = request.GET.get('plan_type', 'fastest')
 
     if not origin_id or not dest_id:
         return JsonResponse({'error': '需要指定起点和终点'}, status=400)
 
-    path = find_path(int(origin_id), int(dest_id))
-    if not path:
+    all_results = find_all_paths(int(origin_id), int(dest_id), priority=priority)
+    if not all_results:
         return JsonResponse({'error': '没有连通路线'}, status=404)
 
     strategy = None
     if strategy_id:
         strategy = HorseChangeStrategy.objects.filter(pk=int(strategy_id)).first()
 
-    total_time = 0
-    segments = []
-    for idx, road in enumerate(path):
-        result = calculate_segment_time(road=road, priority=priority, strategy=strategy)
-        total_time += result['total_time']
-        segments.append({
-            'order': idx + 1,
-            'from': road.from_station.code,
-            'to': road.to_station.code,
-            'distance': road.distance,
-            'time': result['total_time'],
-            'travel_time': result['travel_time'],
-            'horse_change_time': result['horse_change_time'],
-            'is_high_risk': result['is_high_risk'],
+    plans_output = []
+    for ptype, path_roads, path_results_data in all_results:
+        total_time = 0.0
+        total_distance = 0.0
+        risk_count = 0
+        segments = []
+        for idx, (road, seg_result) in enumerate(zip(path_roads, path_results_data)):
+            seg_time = calculate_segment_time(road, priority=priority, strategy=strategy)
+            total_time += seg_time['total_time']
+            total_distance += seg_time['distance']
+            if seg_time['is_high_risk']:
+                risk_count += 1
+            segments.append({
+                'order': idx + 1,
+                'from': road.from_station.code,
+                'to': road.to_station.code,
+                'distance': seg_time['distance'],
+                'time': seg_time['total_time'],
+                'travel_time': seg_time['travel_time'],
+                'horse_change_time': seg_time['horse_change_time'],
+                'process_time': seg_time['process_time'],
+                'is_high_risk': seg_time['is_high_risk'],
+                'grade': road.grade,
+                'slope': road.slope,
+            })
+
+        delay_prob = 0.0
+        is_delay_risk = False
+        if deadline:
+            try:
+                dh = float(deadline)
+                ratio = total_time / dh
+                base_prob = max(0.0, (ratio - 0.7) / 0.5)
+                risk_factor = min(1.0, risk_count * 0.15 + len(path_roads) * 0.02)
+                delay_prob = min(1.0, base_prob * 0.6 + risk_factor * 0.4)
+                is_delay_risk = delay_prob >= 0.3
+            except (ValueError, TypeError):
+                pass
+
+        plans_output.append({
+            'plan_type': ptype,
+            'plan_type_display': dict(DeliveryPlan.PLAN_TYPE_CHOICES).get(ptype, ptype),
+            'total_time': round(total_time, 2),
+            'total_distance': round(total_distance, 2),
+            'risk_count': risk_count,
+            'station_count': len(path_roads),
+            'is_delay_risk': is_delay_risk,
+            'delay_probability': round(delay_prob, 2),
+            'segments': segments,
         })
 
+    selected = next((p for p in plans_output if p['plan_type'] == plan_type), plans_output[0] if plans_output else None)
+
     return JsonResponse({
-        'total_time': round(total_time, 2),
-        'segments': segments,
-        'has_high_risk': any(s['is_high_risk'] for s in segments),
+        'selected_plan': selected,
+        'all_plans': plans_output,
+        'has_high_risk': any(p['risk_count'] > 0 for p in plans_output),
+        'has_delay_risk': any(p['is_delay_risk'] for p in plans_output),
+    })
+
+
+def api_task_plans(request, pk):
+    task = get_object_or_404(DeliveryTask, pk=pk)
+    plans = generate_all_plans(task)
+    comparison = get_plan_comparison_data(task)
+    gantt = get_gantt_data(task)
+    return JsonResponse({
+        'task_code': task.task_code,
+        'selected_plan_type': task.selected_plan_type,
+        'plans': comparison,
+        'gantt': gantt,
+    })
+
+
+def api_segment_config(request, task_pk, segment_pk):
+    task = get_object_or_404(DeliveryTask, pk=task_pk)
+    segment = get_object_or_404(DeliverySegment, pk=segment_pk, task_id=task_pk)
+
+    if request.method == 'POST':
+        try:
+            body = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': '无效的 JSON 数据'}, status=400)
+
+        form = DeliverySegmentForm(body, instance=segment)
+        if form.is_valid():
+            form.save()
+            calculate_delivery_time(task, force_recalculate=True)
+            return JsonResponse({
+                'success': True,
+                'estimated_hours': task.estimated_hours,
+                'delay_warning': task.delay_warning,
+            })
+        else:
+            return JsonResponse({'error': form.errors}, status=400)
+
+    return JsonResponse({
+        'segment_id': segment.pk,
+        'override_strategy_id': segment.override_strategy_id,
+        'override_weather': segment.override_weather,
+        'departure_time': segment.departure_time,
+        'segment_time': segment.segment_time,
     })
